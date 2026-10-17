@@ -1,0 +1,110 @@
+@page "/"
+@page "/opciones"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject IMenuOpcionesService MenuService
+@inject IJSRuntime JS
+
+<PageTitle>Imperium Apps</PageTitle>
+
+<HeadContent>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link href="assets/css/sweetalert.css" rel="stylesheet" />
+    <link href="css/opciones.css" rel="stylesheet" />
+</HeadContent>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><linearGradient id="icg" gradientUnits="userSpaceOnUse" x1="2" y1="2" x2="22" y2="22"><stop offset="0" stop-color="#22a9ee" /><stop offset="1" stop-color="#0a4a83" /></linearGradient></defs></svg>
+<div class="boot" aria-hidden="true"><div><img src="OpcionesN/assetsN/images/logo.jpg" alt="" /><i></i></div></div>
+<div id="wipe" aria-hidden="true"></div>
+<div class="bg" aria-hidden="true"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="dots"></div><canvas id="net"></canvas><div class="streams" id="str"></div><div class="scan"></div><div class="floor"></div></div>
+<div class="glow" aria-hidden="true"></div>
+
+<div class="opc-page">
+    <header>
+        <a class="brand" href="/" aria-label="Imperium - Intelligent Software System"><img src="OpcionesN/assetsN/images/logo.jpg" alt="Imperium Intelligent Software System, Data Quality Solutions" /></a>
+        <div class="hud" aria-live="off"><span class="typed" id="typed"></span><span class="clk" id="clk"></span></div>
+        <div class="support"><img src="OpcionesN/assetsN/images/impulsa.jpeg" alt="Con el apoyo de iNNpulsa Colombia y MinComercio" /></div>
+    </header>
+
+    @* --cols/--rows/dense: misma regla de distribución que el script del legado, calculada aquí
+       para que Blazor controle el atributo y no lo pise un re-render. *@
+    <main id="grid" class="@(filas > 2 ? "dense" : null)" style="--cols:@columnas;--rows:@filas" aria-label="Aplicaciones de Imperium">
+        @for (var i = 0; i < tarjetas.Count; i++)
+        {
+            var tarjeta = tarjetas[i];
+            <a class="card" style="--i:@i" href="@tarjeta.Href" aria-keyshortcuts="@(i + 1)">
+                <span class="vis"><span class="num" aria-hidden="true">@((i + 1).ToString("00"))</span><span class="go" aria-hidden="true"><em>Abrir</em><b><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></b></span><span class="ico"><img src="@tarjeta.Icono" alt="" /></span></span>
+                <span class="body"><span class="deco" aria-hidden="true"><img src="@tarjeta.Icono" alt="" /></span><h2>@tarjeta.Nombre</h2><p>@((MarkupString)tarjeta.Descripcion)</p><span class="bar"></span></span>
+                <span class="ring"></span>
+            </a>
+        }
+    </main>
+
+    <footer>
+        <a href="tel:+573202824280">Contacto: +57 320 2824280</a>
+        <a href="#">Términos y Condiciones</a>
+        <a href="#">Política de Cookies</a>
+        <a href="#">Política de Privacidad</a>
+        <span class="socs">
+            <a class="soc" href="https://www.facebook.com/login/" target="_self" aria-label="Facebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 21v-8h2.7l.4-3.2h-3.1V7.8c0-.9.3-1.5 1.6-1.5h1.7V3.4c-.3 0-1.3-.1-2.4-.1-2.4 0-4 1.4-4 4.1v2.4H7.7V13h2.7v8h3.1Z" /></svg></a>
+            <a class="soc" href="https://www.instagram.com/" target="_self" aria-label="Instagram"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.8 2h8.4A5.8 5.8 0 0 1 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8A5.8 5.8 0 0 1 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2Zm-.2 2A3.6 3.6 0 0 0 4 7.6v8.8A3.6 3.6 0 0 0 7.6 20h8.8a3.6 3.6 0 0 0 3.6-3.6V7.6A3.6 3.6 0 0 0 16.4 4H7.6ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.2-3.1a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4Z" /></svg></a>
+            <a class="soc" href="https://www.linkedin.com/login" target="_self" aria-label="LinkedIn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 9h3.7v11.5H4.5V9Zm1.8-5.5a2.1 2.1 0 1 1 0 4.2 2.1 2.1 0 0 1 0-4.2ZM10.5 9H14v1.6c.5-.9 1.7-1.9 3.6-1.9 3.8 0 4.5 2.5 4.5 5.7v6.1h-3.7v-5.4c0-1.3 0-3-1.8-3s-2.1 1.4-2.1 2.9v5.5h-3.7V9h-.3Z" /></svg></a>
+        </span>
+    </footer>
+</div>
+
+<script src="assets/js/sweetalert.min.js"></script>
+<script src="js/opciones.js"></script>
+
+@code {
+    private IReadOnlyList<AppCard> tarjetas = Array.Empty<AppCard>();
+    private int columnas = 1;
+    private int filas = 1;
+    private IJSObjectReference? modulo;
+
+    [SupplyParameterFromQuery(Name = "Valida")]
+    public string? Valida { get; set; }
+
+    private bool _alertaMostrada;
+
+    protected override void OnInitialized()
+    {
+        tarjetas = MenuService.ObtenerTarjetas();
+
+        // Distribución según la cantidad de aplicaciones (regla del script de Opciones.aspx).
+        var n = Math.Max(tarjetas.Count, 1);
+        columnas = n <= 4 ? n : n <= 6 ? 3 : n <= 8 ? 4 : n <= 15 ? 5 : 6;
+        filas = (int)Math.Ceiling(n / (double)columnas);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        modulo = await JS.InvokeAsync<IJSObjectReference>("import", "./js/opciones-menu.js");
+        await modulo.InvokeVoidAsync("init");
+
+        if (Valida == "1" && !_alertaMostrada)
+        {
+            _alertaMostrada = true;
+            await JS.InvokeVoidAsync("Alerta", "Usuario no corresponde al aplicativo escogido", "");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modulo is null) return;
+        try
+        {
+            await modulo.InvokeVoidAsync("dispose");
+            await modulo.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // El circuito ya se cerró: el navegador libera los listeners al descargar la página.
+        }
+    }
+}

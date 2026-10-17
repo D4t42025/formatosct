@@ -1,0 +1,8 @@
+.cnc-firma-preview {
+    max-width: 235px;
+    max-height: 90px;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.4rem;
+    background: #fff;
+    padding: 0.25rem;
+}

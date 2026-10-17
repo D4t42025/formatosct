@@ -1,0 +1,156 @@
+@page "/formatos/cargar"
+@layout AppLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Contingencia.Application.Auth
+@using Contingencia.Application.Formatos
+@using Contingencia.Web.Services
+@inject IFormatosService FormatosService
+@inject IFormatosArchivoService ArchivoService
+@inject IJSRuntime JS
+
+@* Equivalente a JuntasFormatoCntC.aspx ("Cargar formato"). Réplica fiel del orden de
+   validaciones y los mensajes exactos de btngenerar_ServerClick — ver
+   BASE_DE_DATOS.md para la lista completa de diferencias/decisiones tomadas
+   (extensiones realmente aceptadas vs. las anunciadas en el UI legado, el autocompletado
+   de prestador ahora parametrizado, etc.). *@
+
+<PageTitle>Cargar formato de contingencia</PageTitle>
+
+<div class="fmt-header">
+    <h1><i class="fa-solid fa-file-arrow-up"></i> Cargar formato de contingencia</h1>
+    <p>Diligencie los datos del formato y adjunte el documento soporte.</p>
+</div>
+
+<div class="fmt-card">
+    <div class="fmt-row">
+        <div class="fmt-campo">
+            <label class="fmt-label">Documento usuario</label>
+            <select class="fmt-select" @bind="tipoDocumento">
+                <option value="Ninguno">Ninguno</option>
+                <option value="AS">Adulto sin Identificación</option>
+                <option value="CD">Carné diplomático</option>
+                <option value="CC">Cédula de ciudadanía</option>
+                <option value="CE">Cédula de extranjería</option>
+                <option value="NV">Certificado de nacido vivo</option>
+                <option value="MS">Menor sin Identificación</option>
+                <option value="NI">NIT</option>
+                <option value="PA">Pasaporte</option>
+                <option value="PR">Pasaporte de la ONU</option>
+                <option value="PE">Permiso Especial de Permanencia</option>
+                <option value="PT">Permiso de Protección Temporal</option>
+                <option value="RC">Registro civil</option>
+                <option value="SC">Salvo conducto de permanencia</option>
+                <option value="TI">Tarjeta de identidad</option>
+            </select>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">No documento</label>
+            <input type="text" class="fmt-input" @bind="numeroDocumento" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Fecha formato</label>
+            <input type="date" class="fmt-input" value="@fechaFormato" @onchange="e => fechaFormato = e.Value?.ToString() ?? string.Empty" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">CorreoIPS</label>
+            <input type="email" class="fmt-input" @bind="email" @bind:event="oninput" />
+        </div>
+
+        <div class="fmt-campo fmt-campo-ancho">
+            <label class="fmt-label">Código de Habilitación - Prestador</label>
+            <input class="fmt-input" list="dl-prestador" value="@prestadorTexto" @oninput="OnPrestadorInputAsync" placeholder="Ingresar" />
+            <datalist id="dl-prestador">@foreach (var o in opcionesPrestador) { <option value="@($"{o.Codigo}|{o.Nombre}")"></option> }</datalist>
+        </div>
+
+        <div class="fmt-campo fmt-campo-ancho">
+            <label class="fmt-label">Observaciones</label>
+            <textarea class="fmt-textarea" @bind="observaciones" @bind:event="oninput"></textarea>
+        </div>
+
+        <div class="fmt-campo fmt-campo-ancho">
+            <label class="fmt-label">Cargue formato (.pdf, .tiff, .png)</label>
+            <div class="fmt-file">
+                <InputFile OnChange="OnArchivoSeleccionadoAsync" accept=".pdf,.tiff,.png" />
+            </div>
+        </div>
+    </div>
+
+    <div class="fmt-acciones">
+        <button type="button" class="fmt-btn" disabled="@cargando" @onclick="CargarAsync">
+            <i class="fa-solid fa-save"></i> @(cargando ? "Cargando..." : "Cargar y guardar")
+        </button>
+    </div>
+</div>
+
+@code {
+    private string tipoDocumento = "CC";
+    private string numeroDocumento = "";
+    private string fechaFormato = "";
+    private string email = "";
+    private string prestadorTexto = "";
+    private string observaciones = "";
+    private bool cargando;
+
+    private IReadOnlyList<PrestadorHabilitacion> opcionesPrestador = [];
+    private IBrowserFile? archivo;
+
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? EstadoAutenticacion { get; set; }
+
+    private async Task OnPrestadorInputAsync(ChangeEventArgs e)
+    {
+        prestadorTexto = e.Value?.ToString() ?? "";
+        opcionesPrestador = await FormatosService.BuscarPrestadoresAsync(prestadorTexto);
+    }
+
+    private Task OnArchivoSeleccionadoAsync(InputFileChangeEventArgs e)
+    {
+        archivo = e.File;
+        return Task.CompletedTask;
+    }
+
+    private async Task CargarAsync()
+    {
+        cargando = true;
+        try
+        {
+            var estado = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
+            var usuario = estado?.User;
+            var cia = usuario?.Cia() ?? "";
+            var usuApp = usuario?.UsuApp() ?? "";
+
+            // El prestador viaja como "Codigo|Nombre" (mismo formato que armaba el
+            // AutoCompleteExtender legado) — solo se guarda el código, igual que txtnit.Text
+            // en el legado (el usuario podía dejar el texto libre sin elegir del listado;
+            // aquí se replica esa misma libertad, no se obliga a elegir una sugerencia).
+            var extension = archivo is not null ? Path.GetExtension(archivo.Name).ToLowerInvariant() : "";
+
+            var resultado = await FormatosService.ValidarYRegistrarAsync(
+                cia, usuApp, tipoDocumento, numeroDocumento, prestadorTexto, observaciones,
+                extension, archivo is not null, email, fechaFormato);
+
+            if (!resultado.Exito)
+            {
+                await JS.InvokeVoidAsync("Tran", resultado.Mensaje, "");
+                return;
+            }
+
+            // Réplica de file.SaveAs(...) en el legado — el radicado recién devuelto por el
+            // SP es el nombre de archivo, no el nombre original que subió el usuario.
+            var ruta = ArchivoService.RutaFisica(cia, resultado.Radicado!, extension);
+            await using (var stream = archivo!.OpenReadStream(maxAllowedSize: 30 * 1024 * 1024))
+            {
+                await ArchivoService.GuardarAsync(ruta, stream);
+            }
+
+            await JS.InvokeVoidAsync("TranT", "Formato Cargado", $"Radicado: {resultado.Radicado}", "/inicio");
+        }
+        finally
+        {
+            cargando = false;
+        }
+    }
+}

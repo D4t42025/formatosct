@@ -1,0 +1,308 @@
+/* Estilos compartidos por las páginas de Formatos de contingencia (Cargar/Consultar).
+   Mismo esquema de color y componentes que Imperium.Web/Components/Pages/Indicadores.razor.css
+   de Recobros (azul #2b6ff2, tarjetas blancas redondeadas, botones en degradado) — no se usa
+   Bootstrap porque AppLayout no lo carga globalmente (solo Login.razor lo trae, con su propio
+   <HeadContent>, para esa página en particular). */
+
+.fmt-header {
+    margin-bottom: 1.25rem;
+}
+
+.fmt-header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #0f1f45;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.fmt-header h1 i {
+    color: #2b6ff2;
+    font-size: 1.15rem;
+}
+
+.fmt-header p {
+    margin: 0.15rem 0 0;
+    color: #64748b;
+    font-size: 0.9rem;
+}
+
+.fmt-card {
+    background: #fff;
+    border: 1px solid #eef1f9;
+    border-radius: 0.75rem;
+    padding: 1.25rem 1.5rem 1.5rem;
+    box-shadow: 0 2px 8px rgba(15, 31, 69, 0.05);
+}
+
+.fmt-card + .fmt-card {
+    margin-top: 1.25rem;
+}
+
+.fmt-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.1rem;
+    margin: 0 -0.1rem;
+}
+
+.fmt-campo {
+    flex: 1 1 220px;
+    min-width: 200px;
+}
+
+.fmt-campo-ancho {
+    flex-basis: 100%;
+}
+
+.fmt-label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #475569;
+    margin: 0 0 0.4rem;
+}
+
+.fmt-input, .fmt-select, .fmt-textarea {
+    width: 100%;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #d7dce3;
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
+    font-family: inherit;
+    box-sizing: border-box;
+    background: #fff;
+    color: #1e293b;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.fmt-input:focus, .fmt-select:focus, .fmt-textarea:focus {
+    outline: none;
+    border-color: #2b6ff2;
+    box-shadow: 0 0 0 3px rgba(43, 111, 242, 0.15);
+}
+
+.fmt-textarea {
+    resize: vertical;
+    min-height: 4.5rem;
+}
+
+.fmt-file {
+    padding: 0.6rem 0.75rem;
+    border: 1px dashed #c9d3e0;
+    border-radius: 0.5rem;
+    background: #f8fafc;
+}
+
+.fmt-acciones {
+    margin-top: 1.35rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.fmt-btn, .fmt-btn-secundario {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.6rem 1.4rem;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease;
+    font-family: inherit;
+}
+
+.fmt-btn {
+    background: linear-gradient(135deg, #2b6ff2 0%, #1e4fc4 100%);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(43, 111, 242, 0.3);
+}
+
+.fmt-btn:hover:not(:disabled) {
+    box-shadow: 0 6px 16px rgba(43, 111, 242, 0.4);
+    transform: translateY(-1px);
+}
+
+.fmt-btn-secundario {
+    background: #eaf1ff;
+    color: #1e4fc4;
+    border: 1px solid #c9dcff;
+}
+
+.fmt-btn-secundario:hover:not(:disabled) {
+    background: #d7e6ff;
+}
+
+.fmt-ayuda {
+    margin: 0.6rem 0 0;
+    font-size: 0.78rem;
+    color: #94a3b8;
+}
+
+.fmt-btn:disabled, .fmt-btn-secundario:disabled {
+    opacity: 0.65;
+    cursor: default;
+    transform: none;
+}
+
+.fmt-vacio {
+    color: #94a3b8;
+    font-size: 0.9rem;
+    margin: 0;
+    padding: 0.5rem 0;
+}
+
+.fmt-tabla-scroll {
+    overflow-x: auto;
+    background: #fff;
+    border: 1px solid #eef1f9;
+    border-radius: 14px;
+    box-shadow: 0 2px 8px rgba(15, 31, 69, 0.06);
+    padding: 0.5rem;
+}
+
+.fmt-tabla {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.fmt-tabla th {
+    background: #eef3fd;
+    color: #1e3a5f;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 0.7rem;
+    padding: 0.6rem 0.7rem;
+    text-align: left;
+    white-space: nowrap;
+    border-bottom: 2px solid #2b6ff2;
+}
+
+.fmt-tabla td {
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid #eef0f4;
+    color: #334155;
+    vertical-align: middle;
+}
+
+.fmt-tabla tbody tr:hover {
+    background: #f7faff;
+}
+
+.fmt-tabla a {
+    color: #2b6ff2;
+    font-size: 1rem;
+}
+
+.fmt-tabla a:hover {
+    color: #1e4fc4;
+}
+
+.fmt-estado {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: #eef3fd;
+    color: #1e4fc4;
+    white-space: nowrap;
+}
+
+.fmt-icono-btn {
+    background: transparent;
+    border: none;
+    color: #2b6ff2;
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.4rem;
+    transition: background 0.15s ease;
+}
+
+.fmt-icono-btn:hover {
+    background: #eaf1ff;
+    color: #1e4fc4;
+}
+
+/* Modal de gestión (equivalente al popup JuntasFormatoCntCO2.aspx del legado, migrado a un
+   modal en la misma pantalla) — mismo lenguaje visual que Imperium.Web/Components/Pages/
+   Indicadores.razor.css (Recobros). */
+.fmt-modal-fondo {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1.5rem;
+}
+
+.fmt-modal {
+    background: #fff;
+    border-radius: 0.75rem;
+    width: 100%;
+    max-width: 480px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(15, 31, 69, 0.3);
+}
+
+.fmt-modal-encabezado {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #eef0f4;
+}
+
+.fmt-modal-encabezado h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: #1e293b;
+}
+
+.fmt-modal-cerrar {
+    background: transparent;
+    border: none;
+    font-size: 1.4rem;
+    line-height: 1;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0.2rem 0.5rem;
+}
+
+.fmt-modal-cerrar:hover {
+    color: #1e293b;
+}
+
+.fmt-modal-cuerpo {
+    padding: 1rem 1.25rem 0.25rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.fmt-modal-acciones {
+    padding: 1rem 1.25rem 1.25rem;
+}
+
+.fmt-paginacion {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: #475569;
+}

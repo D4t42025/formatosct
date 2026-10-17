@@ -1,0 +1,96 @@
+.sug-header {
+    margin-bottom: 1.25rem;
+}
+
+.sug-header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+}
+
+.sug-header p {
+    margin: 0.15rem 0 0;
+    color: #64748b;
+    font-size: 0.9rem;
+}
+
+.sug-card {
+    background: #fff;
+    border: 1px solid #eef0f4;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    max-width: 640px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.sug-label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #475569;
+    margin: 1rem 0 0.4rem;
+}
+
+.sug-label:first-of-type {
+    margin-top: 0;
+}
+
+.sug-input {
+    width: 100%;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #d7dce3;
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
+    font-family: inherit;
+    box-sizing: border-box;
+    background: #fff;
+}
+
+.sug-textarea {
+    resize: vertical;
+    min-height: 150px;
+}
+
+.sug-acciones {
+    margin-top: 1.5rem;
+    text-align: center;
+}
+
+.sug-btn {
+    background: #2b6ff2;
+    color: #fff;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.6rem 1.6rem;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(43, 111, 242, 0.3);
+}
+
+.sug-btn:hover:not(:disabled) {
+    background: #1e4fc4;
+}
+
+.sug-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.alert {
+    padding: 0.55rem 0.8rem;
+    border-radius: 0.5rem;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+}
+
+.alert-ok {
+    background: #eaf1ff;
+    color: #1e4fc4;
+}
+
+.alert-error {
+    background: #fef2f2;
+    color: #b91c1c;
+}

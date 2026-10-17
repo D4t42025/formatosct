@@ -1,0 +1,245 @@
+.nc-progreso {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.nc-progreso-paso {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #94a3b8;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.nc-progreso-paso.completado {
+    background: #eaf1ff;
+    color: #1e4fc4;
+}
+
+.nc-progreso-paso.activo {
+    background: linear-gradient(135deg, #2b6ff2 0%, #1e4fc4 100%);
+    color: #fff;
+}
+
+.nc-progreso-numero {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.3rem;
+    height: 1.3rem;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.35);
+    font-size: 0.7rem;
+}
+
+.nc-firma-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.nc-firma-canvas-wrap {
+    border: 1px dashed #cbd5e1;
+    border-radius: 0.5rem;
+    display: inline-block;
+    background: #fff;
+}
+
+.nc-firma-canvas-wrap canvas {
+    display: block;
+    touch-action: none;
+    cursor: crosshair;
+}
+
+.nc-firma-preview {
+    max-width: 235px;
+    max-height: 90px;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.4rem;
+    background: #fff;
+    padding: 0.25rem;
+}
+
+.nc-revision p {
+    margin: 0 0 0.6rem;
+    font-size: 0.9rem;
+    color: #334155;
+}
+
+.nc-revision strong {
+    color: #1e293b;
+}
+
+.nc-dictado {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.65rem;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.25rem;
+}
+
+.nc-dictado-encabezado {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.nc-dictado-encabezado strong {
+    color: #1e293b;
+    font-size: 0.92rem;
+}
+
+.nc-dictado-encabezado strong i {
+    color: #2b6ff2;
+    margin-right: 0.3rem;
+}
+
+.nc-dictado-botones {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.nc-dictado-transcripcion {
+    margin-top: 0.75rem;
+    min-height: 3rem;
+}
+
+.nc-dictado-ejemplo {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+.nc-causal-fila {
+    display: flex;
+    gap: 0.6rem;
+    align-items: stretch;
+}
+
+.nc-causal-fila select {
+    flex: 1;
+}
+
+.nc-causal-crear {
+    white-space: nowrap;
+}
+
+.nc-paso-encabezado {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1.1rem;
+}
+
+.nc-paso-encabezado h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: #1e293b;
+}
+
+.nc-paso-badge {
+    flex-shrink: 0;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.nc-info-panel {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 2rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.65rem;
+    padding: 1rem 1.25rem;
+    margin-top: 1rem;
+}
+
+.nc-info-etiqueta {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #94a3b8;
+}
+
+.nc-info-valor {
+    display: block;
+    font-size: 0.95rem;
+    color: #1e293b;
+    font-weight: 600;
+}
+
+.nc-info-item-ancho {
+    grid-column: 1 / -1;
+}
+
+.nc-buscar-campo {
+    display: flex;
+    align-items: flex-end;
+}
+
+.nc-buscar-campo .fmt-btn {
+    width: 100%;
+    justify-content: center;
+}
+
+.nc-tec-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.nc-tec-tarjeta {
+    cursor: pointer;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.65rem;
+    padding: 1rem 1.25rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.nc-tec-tarjeta:hover {
+    border-color: #94a3b8;
+}
+
+.nc-tec-tarjeta strong {
+    display: block;
+    color: #1e293b;
+    font-size: 1rem;
+    margin-bottom: 0.35rem;
+}
+
+.nc-tec-tarjeta p {
+    margin: 0;
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.nc-tec-tarjeta.seleccionada {
+    border-color: #2b6ff2;
+    border-width: 2px;
+    padding: calc(1rem - 1px) calc(1.25rem - 1px);
+    box-shadow: 0 0 0 3px rgba(43, 111, 242, 0.12);
+}
+
+@media (max-width: 640px) {
+    .nc-tec-grid {
+        grid-template-columns: 1fr;
+    }
+}

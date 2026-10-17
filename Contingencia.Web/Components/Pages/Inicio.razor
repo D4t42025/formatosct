@@ -1,0 +1,113 @@
+@page "/inicio"
+@layout AppLayout
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+
+@* Equivalente a JuntasFormatoCnt.aspx (destino real del rol 601 tras el login) — el .aspx
+   original no tiene ninguna tabla ni SP involucrado, solo 2 tarjetas de navegación hacia
+   JuntasFormatoCntC.aspx ("Cargar formato") y JuntasFormatoCntCO.aspx ("Consultar
+   formato"), ambas ya migradas (/formatos/cargar y /formatos/consultar).
+
+   El CSS de hover-flip del .aspx original está escrito como SCSS (variables "$ease_out",
+   anidamiento "&:hover"), no como CSS válido — probablemente pensado para un
+   preprocesador que nunca corrió, y solo "funciona" hoy por casualidad en navegadores que
+   ya soportan CSS nesting nativo. Aquí se reconstruye el mismo efecto (frente estático,
+   reverso con la descripción al pasar el mouse) con CSS plano y válido, no una copia
+   literal de esa hoja de estilos. *@
+
+<PageTitle>Formato de Contingencia</PageTitle>
+
+<style>
+    .fc-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+        justify-content: center;
+        padding: 1rem 0;
+    }
+
+    .fc-card {
+        width: 260px;
+        height: 220px;
+        perspective: 1000px;
+    }
+
+    .fc-card-inner {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        text-align: center;
+        transition: transform 0.6s;
+        transform-style: preserve-3d;
+    }
+
+    .fc-card:hover .fc-card-inner {
+        transform: rotateY(180deg);
+    }
+
+    .fc-front, .fc-back {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        backface-visibility: hidden;
+        color: #fff;
+        padding: 1.25rem;
+        box-sizing: border-box;
+    }
+
+    .fc-front {
+        background: #1c2235;
+        text-decoration: none;
+    }
+
+    .fc-front img {
+        width: 70px;
+        margin-bottom: 0.75rem;
+    }
+
+    .fc-front h2 {
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin: 0;
+    }
+
+    .fc-back {
+        background: #2b6ff2;
+        transform: rotateY(180deg);
+    }
+
+    .fc-back p {
+        margin: 0;
+        font-size: 0.92rem;
+        line-height: 1.4;
+    }
+</style>
+
+<div class="fc-grid">
+    <a href="/formatos/cargar" class="fc-card">
+        <div class="fc-card-inner">
+            <div class="fc-front">
+                <img src="Img/Cargar.png" alt="Cargar formato" />
+                <h2>Cargar formato</h2>
+            </div>
+            <div class="fc-back">
+                <p>Rellene los datos a continuación y cargue el formato de contingencia.</p>
+            </div>
+        </div>
+    </a>
+    <a href="/formatos/consultar" class="fc-card">
+        <div class="fc-card-inner">
+            <div class="fc-front">
+                <img src="Img/descdoc.png" alt="Consultar formato" />
+                <h2>Consultar formato</h2>
+            </div>
+            <div class="fc-back">
+                <p>Ingrese los filtros de búsqueda y verifique el estado actual del formato cargado.</p>
+            </div>
+        </div>
+    </a>
+</div>

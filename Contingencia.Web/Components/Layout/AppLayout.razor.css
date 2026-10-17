@@ -1,0 +1,742 @@
+/* Unificado visualmente con el sidebar/topbar de IMPERIUM 3 (referencia: Pages/Shared/
+   _LayoutPublic.cshtml del proyecto IMPERIUM LINUX — ese proyecto NO se modifica, solo se
+   toma como guía de estilo). Sidebar oscuro con degradado azul-marino, grupo colapsable con
+   línea lateral, botón de colapsar a modo ícono, y topbar con breadcrumb + badge de sesión
+   + avatar con iniciales. */
+
+@keyframes ap-glint { 0%, 78% { left: -70%; } 100% { left: 140%; } }
+@keyframes ap-pulse-dot { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, .55); } 70%, 100% { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0); } }
+@keyframes ap-line-flow { from { background-position: 0 0; } to { background-position: 200% 0; } }
+@keyframes ap-fade-in-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+.app-shell {
+    --ap-ink: #06142a;
+    --ap-ink-2: #0b2a4f;
+    --ap-blue: #1f86d1;
+    --ap-blue-d: #0f5f9f;
+    --ap-sky: #8cc8f0;
+    --ap-nav-text: #b4c7dc;
+    --ap-nav-muted: #7894b3;
+    --ap-sb-w: 258px;
+    --ap-sb-w-collapsed: 78px;
+    --ap-ease: cubic-bezier(.4, 0, .2, 1);
+
+    display: flex;
+    min-height: 100vh;
+    background: #f0f2f5;
+    font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ===================== SIDEBAR ===================== */
+
+.app-sidebar {
+    width: var(--ap-sb-w);
+    min-width: var(--ap-sb-w);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    background: linear-gradient(180deg, #071b36 0%, #06142a 52%, #040d1c 100%);
+    border-right: 1px solid rgba(140, 200, 240, .10);
+    box-shadow: 22px 0 44px -30px rgba(6, 20, 42, .7);
+    overflow: hidden;
+    transition: width .3s var(--ap-ease), min-width .3s var(--ap-ease), margin-left .2s ease;
+}
+
+.app-sidebar-header {
+    padding: 18px 16px 16px;
+    border-bottom: 1px solid rgba(140, 200, 240, .10);
+}
+
+.app-brand-card {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    border-radius: 12px;
+    box-shadow: 0 12px 26px -14px rgba(0, 0, 0, .8), 0 0 0 1px rgba(255, 255, 255, .14);
+}
+
+.app-brand-card::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -70%;
+    width: 40%;
+    height: 100%;
+    transform: skewX(-20deg);
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .4), transparent);
+    animation: ap-glint 7s 1.5s ease-in-out infinite;
+}
+
+.app-logo {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.app-logo-small {
+    display: none;
+    width: 44px;
+    margin: 0 auto;
+    border-radius: 10px;
+}
+
+.app-nav {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 6px 12px 14px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(140, 200, 240, .25) transparent;
+}
+
+.app-nav::-webkit-scrollbar {
+    width: 6px;
+}
+
+.app-nav::-webkit-scrollbar-thumb {
+    background: rgba(140, 200, 240, .22);
+    border-radius: 6px;
+}
+
+.app-nav-section {
+    padding: 16px 10px 7px;
+    font: 600 10.5px/1 'Outfit', 'Inter', system-ui, sans-serif;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    color: var(--ap-nav-muted);
+}
+
+.app-nav-link, .app-nav-sublink {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 42px;
+    padding: 5px 10px 5px 6px;
+    margin-bottom: 3px;
+    border-radius: 12px;
+    color: var(--ap-nav-text);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background .2s var(--ap-ease), color .2s var(--ap-ease);
+}
+
+.app-nav-icon {
+    width: 32px;
+    height: 32px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .045);
+    color: #7fa3c7;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06);
+    transition: background .2s var(--ap-ease), color .2s var(--ap-ease), box-shadow .2s var(--ap-ease);
+}
+
+.app-nav-icon i {
+    font-size: 15px;
+    line-height: 1;
+}
+
+.app-nav-label {
+    font: 500 14px/1.25 'Outfit', 'Inter', system-ui, sans-serif;
+}
+
+.app-nav-link:hover, .app-nav-sublink:hover {
+    background: rgba(140, 200, 240, .09);
+    color: #fff;
+}
+
+.app-nav-link:hover .app-nav-icon, .app-nav-sublink:hover .app-nav-icon {
+    background: rgba(31, 134, 209, .24);
+    color: #d3ebfc;
+    box-shadow: inset 0 0 0 1px rgba(140, 200, 240, .28);
+}
+
+.app-nav-link.active, .app-nav-sublink.active {
+    background: linear-gradient(90deg, rgba(31, 134, 209, .32), rgba(31, 134, 209, .07) 88%);
+    color: #fff;
+    box-shadow: inset 0 0 0 1px rgba(140, 200, 240, .16);
+}
+
+.app-nav-link.active .app-nav-label, .app-nav-sublink.active .app-nav-label {
+    font-weight: 600;
+}
+
+.app-nav-link.active .app-nav-icon, .app-nav-sublink.active .app-nav-icon {
+    background: linear-gradient(135deg, #2b97e6, #0f5f9f);
+    color: #fff;
+    box-shadow: 0 10px 18px -8px rgba(31, 134, 209, .95), inset 0 0 0 1px rgba(255, 255, 255, .28);
+}
+
+.app-nav-link.active::before, .app-nav-sublink.active::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    top: 9px;
+    bottom: 9px;
+    width: 4px;
+    border-radius: 0 4px 4px 0;
+    background: linear-gradient(180deg, var(--ap-sky), var(--ap-blue));
+    box-shadow: 0 0 14px rgba(140, 200, 240, .75);
+}
+
+/* Grupo desplegable ("Mipres") */
+
+.app-nav-group summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.app-nav-group summary::-webkit-details-marker {
+    display: none;
+}
+
+.app-nav-group-toggle {
+    justify-content: space-between;
+}
+
+.app-nav-group-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.app-nav-caret {
+    font-size: 11px !important;
+    color: var(--ap-nav-muted);
+    transition: transform .25s var(--ap-ease), color .2s;
+    flex: none;
+}
+
+.app-nav-group[open] .app-nav-caret {
+    transform: rotate(90deg);
+    color: var(--ap-sky);
+}
+
+.app-nav-group-toggle.has-active {
+    color: #fff;
+}
+
+.app-nav-group-toggle.has-active .app-nav-icon {
+    background: rgba(31, 134, 209, .28);
+    color: #d3ebfc;
+    box-shadow: inset 0 0 0 1px rgba(140, 200, 240, .3);
+}
+
+.app-nav-subgroup {
+    position: relative;
+    margin: 0 0 4px 22px;
+    padding-left: 12px;
+}
+
+.app-nav-subgroup::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    bottom: 8px;
+    width: 1px;
+    background: rgba(140, 200, 240, .18);
+}
+
+.app-nav-subgroup .app-nav-sublink {
+    min-height: 38px;
+    padding-left: 4px;
+}
+
+.app-nav-subgroup .app-nav-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+}
+
+.app-nav-subgroup .app-nav-icon i {
+    font-size: 12px;
+}
+
+.app-nav-subgroup .app-nav-sublink .app-nav-label {
+    font-size: 13px;
+}
+
+.app-nav-subgroup .app-nav-sublink.active::before {
+    display: none;
+}
+
+/* Botón de colapsar */
+
+.app-sidebar-collapse-wrap {
+    padding: 12px;
+    border-top: 1px solid rgba(140, 200, 240, .10);
+}
+
+.app-sidebar-collapse-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid rgba(255, 255, 255, .07);
+    color: var(--ap-nav-muted);
+    font: 500 13px 'Outfit', 'Inter', system-ui, sans-serif;
+    transition: background .2s var(--ap-ease), color .2s var(--ap-ease);
+}
+
+.app-sidebar-collapse-btn:hover {
+    background: rgba(140, 200, 240, .10);
+    color: #fff;
+}
+
+.app-collapse-icon {
+    font-size: 14px;
+    transition: transform .3s var(--ap-ease);
+}
+
+/* Sidebar colapsado (modo ícono, escritorio) */
+
+.app-sidebar.app-sidebar-collapsed {
+    width: var(--ap-sb-w-collapsed);
+    min-width: var(--ap-sb-w-collapsed);
+}
+
+.app-sidebar.app-sidebar-collapsed .app-nav-label,
+.app-sidebar.app-sidebar-collapsed .app-collapse-label,
+.app-sidebar.app-sidebar-collapsed .app-nav-caret,
+.app-sidebar.app-sidebar-collapsed .app-nav-section span,
+.app-sidebar.app-sidebar-collapsed .app-logo-full {
+    display: none;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-logo-small {
+    display: block;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-brand-card {
+    box-shadow: none;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-brand-card::after {
+    display: none;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-sidebar-header {
+    padding: 16px 0;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-nav {
+    padding: 6px 10px 14px;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-nav-section {
+    padding: 10px 6px 6px;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-nav-link,
+.app-sidebar.app-sidebar-collapsed .app-nav-group-toggle {
+    justify-content: center;
+    padding: 5px 0;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-nav-link.active::before {
+    left: -2px;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-nav-group-left {
+    gap: 0;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-nav-subgroup {
+    display: none;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-sidebar-collapse-wrap {
+    padding: 12px 10px;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-sidebar-collapse-btn {
+    justify-content: center;
+    padding: 10px 0;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-collapse-icon {
+    transform: rotate(180deg);
+}
+
+.app-sidebar.app-sidebar-collapsed .app-sidebar-cliente {
+    margin: 1.25rem 10px 16px;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-sidebar-cliente-card {
+    padding: 8px;
+}
+
+.app-sidebar.app-sidebar-collapsed .app-sidebar-cliente img {
+    max-width: 40px;
+    margin: 0 auto;
+}
+
+.app-sidebar-cliente {
+    margin: 1.25rem 16px 16px;
+    padding-top: 1.25rem;
+    border-top: 1px solid rgba(140, 200, 240, .10);
+}
+
+/* El logo del cliente suele venir con fondo blanco propio (como el de EPS Sanitas): en vez
+   de pegarlo directo sobre el degradado azul-marino del sidebar (quedaba un rectángulo
+   blanco duro, sin relación con el resto del diseño), se envuelve en una tarjeta clara con
+   bordes redondeados y sombra suave, a tono con el resto de las tarjetas del sidebar. */
+.app-sidebar-cliente-card {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border-radius: 14px;
+    padding: 12px 14px;
+    box-shadow: 0 10px 24px -12px rgba(0, 0, 0, .45);
+}
+
+.app-sidebar-cliente img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 6px;
+}
+
+.app-sidebar-backdrop {
+    display: none;
+}
+
+/* ===================== MAIN / TOPBAR ===================== */
+
+.app-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    height: 68px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    background: rgba(255, 255, 255, .82);
+    -webkit-backdrop-filter: blur(14px) saturate(1.5);
+    backdrop-filter: blur(14px) saturate(1.5);
+    border-bottom: 1px solid rgba(15, 95, 159, .10);
+    box-shadow: 0 12px 30px -24px rgba(6, 20, 42, .5);
+}
+
+.app-topbar::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    pointer-events: none;
+    opacity: .6;
+    background: linear-gradient(90deg, transparent, var(--ap-blue), var(--ap-sky), var(--ap-blue), transparent);
+    background-size: 200% 100%;
+    animation: ap-line-flow 9s linear infinite;
+}
+
+.app-topbar-left, .app-topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.app-topbar-right {
+    gap: 14px;
+}
+
+.app-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 12px;
+    border: 1px solid #d9e4f0;
+    background: #fff;
+    color: var(--ap-ink-2);
+    cursor: pointer;
+    transition: background .2s, border-color .2s;
+}
+
+.app-menu-toggle:hover {
+    background: #eef5fb;
+    border-color: #bcd4ea;
+}
+
+.app-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.app-breadcrumb-icon {
+    width: 36px;
+    height: 36px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 11px;
+    background: linear-gradient(135deg, #e8f3fc, #d2e7f8);
+    color: var(--ap-blue-d);
+    box-shadow: inset 0 0 0 1px rgba(15, 95, 159, .12);
+}
+
+.app-breadcrumb-icon i {
+    font-size: 16px;
+}
+
+.app-breadcrumb-text {
+    min-width: 0;
+    line-height: 1.15;
+}
+
+.app-breadcrumb-over {
+    display: block;
+    font: 600 10.5px/1 'Outfit', 'Inter', system-ui, sans-serif;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #6b86a3;
+    margin-bottom: 4px;
+}
+
+.app-breadcrumb-title {
+    display: block;
+    font: 600 17px/1.15 'Outfit', 'Inter', system-ui, sans-serif;
+    color: var(--ap-ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 46vw;
+}
+
+.app-session-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 13px 6px 10px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #f2fcf6, #e5f7ed);
+    border: 1px solid #bfe6d0;
+    color: #12794f;
+    font: 600 12px 'Outfit', 'Inter', system-ui, sans-serif;
+    white-space: nowrap;
+}
+
+.app-session-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    animation: ap-pulse-dot 2.2s ease-out infinite;
+}
+
+.app-topbar-sep {
+    width: 1px;
+    height: 28px;
+    background: linear-gradient(transparent, #d3e0ee, transparent);
+}
+
+.app-user-block {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 5px 4px;
+    border-radius: 999px;
+}
+
+.app-avatar {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 50%;
+    padding: 2px;
+    background: conic-gradient(from 210deg, #8cc8f0, #1f86d1, #0f5f9f, #8cc8f0);
+}
+
+.app-avatar::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #22c55e;
+    border: 2px solid #fff;
+}
+
+.app-avatar-in {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border: 2px solid #fff;
+    background: linear-gradient(135deg, #1f86d1, #0b2a4f);
+    color: #fff;
+    font: 700 13px 'Outfit', 'Inter', system-ui, sans-serif;
+}
+
+.app-user-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.app-user-name {
+    color: var(--ap-ink);
+    font: 600 14px/1.2 'Outfit', 'Inter', system-ui, sans-serif;
+}
+
+.app-role-pill {
+    display: inline-block;
+    margin-top: 3px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: #e4f0fa;
+    color: var(--ap-blue-d);
+    font: 600 11px/1.3 'Outfit', 'Inter', system-ui, sans-serif;
+    letter-spacing: .02em;
+    width: fit-content;
+}
+
+.app-logout-btn {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    border-radius: 12px;
+    border: 1px solid #d9e4f0;
+    background: #fff;
+    color: #4a647d;
+    transition: background .2s, border-color .2s, color .2s, transform .15s;
+}
+
+.app-logout-btn:hover {
+    background: #fdecea;
+    border-color: #f5c2bd;
+    color: #b42318;
+}
+
+.app-logout-btn:active {
+    transform: scale(.95);
+}
+
+.app-logout-btn i {
+    font-size: 17px;
+}
+
+.app-content {
+    flex: 1;
+    min-width: 0;
+    padding: 1.75rem;
+    animation: ap-fade-in-up .35s var(--ap-ease) both;
+}
+
+/* Réplica del pie de página "Imperium-DQS © ... All Rights Reserved | by Data Quality
+   Solutions" que trae SiteMipresN.Master. */
+.app-footer {
+    padding: 1rem 1.75rem;
+    text-align: center;
+    color: #94a3b8;
+    font-size: .78rem;
+    border-top: 1px solid #eef0f6;
+    background: #fff;
+}
+
+.app-footer p {
+    margin: .15rem 0;
+}
+
+.app-footer strong {
+    color: #64748b;
+}
+
+/* ===================== RESPONSIVE ===================== */
+
+@media (max-width: 1024px) {
+    .app-topbar {
+        padding: 0 18px;
+    }
+
+    .app-content {
+        padding: 1.25rem;
+    }
+
+    .app-user-text {
+        display: none;
+    }
+}
+
+@media (max-width: 900px) {
+    .app-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 30;
+        height: 100vh;
+    }
+
+    .app-sidebar-backdrop.visible {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(6, 20, 42, .55);
+        -webkit-backdrop-filter: blur(2px);
+        backdrop-filter: blur(2px);
+        z-index: 25;
+    }
+
+    .app-topbar {
+        padding: 0 14px;
+        height: 60px;
+    }
+
+    .app-breadcrumb-title {
+        max-width: 52vw;
+        font-size: 16px;
+    }
+
+    .app-session-badge, .app-topbar-sep, .app-breadcrumb-icon, .app-breadcrumb-over {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-brand-card::after, .app-session-dot, .app-topbar::after, .app-content {
+        animation: none !important;
+    }
+
+    .app-sidebar, .app-nav-link, .app-nav-sublink, .app-nav-icon, .app-nav-caret {
+        transition: none !important;
+    }
+}

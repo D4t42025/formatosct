@@ -1,0 +1,1914 @@
+@page "/formatos/contingencias/nueva"
+@layout AppLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@implements IDisposable
+@using System.Data
+@using System.Globalization
+@using System.Text
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Contingencia.Application.Auth
+@using Contingencia.Application.Formatos
+@using Contingencia.Application.Profesionales
+@using Contingencia.Application.Cie10
+@using Contingencia.Application.Codigos
+@using Contingencia.Application.Dci
+@using Contingencia.Application.Contingencias
+@using Contingencia.Application.Parametricas
+@using Contingencia.Application.Afiliados
+@using Contingencia.Application.CiaParametros
+@using Contingencia.Infrastructure.Cie10
+@using Contingencia.Infrastructure.Codigos
+@using Contingencia.Infrastructure.Profesionales
+@using Contingencia.Infrastructure.Filtros
+@using Contingencia.Web.Services
+@inject IFormatosService FormatosService
+@inject IProfesionalesService ProfesionalesService
+@inject ICie10Service Cie10Service
+@inject ICodigosService CodigosService
+@inject IDciService DciService
+@inject IParametricasService ParametricasService
+@inject IAfiliadoService AfiliadoService
+@inject ICiaParametrosService CiaParametrosService
+@inject IFiltrosRepository FiltrosRepository
+@inject IContingenciasService ContingenciasService
+@inject IContingenciaArchivoService ArchivoService
+@inject IJSRuntime JS
+@inject NavigationManager NavManager
+
+@* Wizard de 11 pasos "Nueva Contingencia MIPRES", inspirado en el prototipo externo
+   mipres-flow-buddy.lovable.app/nueva-contingencia. No es una migración de una pantalla
+   legada (no existe ningún equivalente en el WebForms original) — es una funcionalidad
+   nueva que registra una contingencia con datos estructurados, en vez de solo cargar un PDF
+   ya diligenciado (eso es lo que hace "Cargar formato"/CargarFormato.razor).
+
+   La firma capturada acá (dibujo en canvas o archivo, mismo patrón que Profesionales.razor)
+   es un PLACEHOLDER local: no integra ningún proveedor real de firma electrónica avanzada
+   (FEA) — ver el aviso fijo en el paso 10 y la columna FIRMAPENDIENTEFEA (siempre 1) en
+   BASE_DE_DATOS.md.
+
+   El dictado por voz (pasos 1-9) usa la Web Speech API del navegador (100% del lado del
+   cliente, ver dictado-voz.js) — requiere Chrome/Edge y contexto seguro (HTTPS o
+   localhost); si el navegador no la soporta, el bloque se muestra deshabilitado con un
+   aviso. El reconocimiento de campo+valor es "mejor esfuerzo" (busca el sinónimo de campo
+   más largo mencionado en la frase y toma lo que sigue como el valor, con fuzzy-match
+   contra catálogos cerrados) — nunca bloquea el flujo: lo que no se reconoce se deja para
+   llenar a mano. Ver BASE_DE_DATOS.md, "Página 11", para el detalle completo. *@
+
+<PageTitle>Nueva contingencia MIPRES</PageTitle>
+
+<div class="fmt-header">
+    <h1><i class="fa-solid fa-triangle-exclamation"></i> Nueva contingencia MIPRES</h1>
+    <p>Radique una contingencia con datos estructurados, paso a paso.</p>
+</div>
+
+<div class="fmt-card">
+    <div class="nc-progreso">
+        @for (var i = 0; i < TitulosPaso.Length; i++)
+        {
+            var numero = i + 1;
+            <div class="nc-progreso-paso @(numero == pasoActual ? "activo" : "") @(numero < pasoActual ? "completado" : "")">
+                <span class="nc-progreso-numero">@numero</span>
+                <span class="nc-progreso-titulo">@TitulosPaso[i]</span>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="fmt-card" style="margin-top:1.25rem">
+    @if (mensaje is not null)
+    {
+        <p class="fmt-ayuda" style="color:#c0392b">@mensaje</p>
+    }
+
+    <div class="nc-paso-encabezado">
+        <h2>@pasoActual. @TitulosPaso[pasoActual - 1]</h2>
+        <span class="nc-paso-badge">PASO @pasoActual/@TitulosPaso.Length</span>
+    </div>
+
+    @if (pasoActual <= 9)
+    {
+        <div class="nc-dictado">
+            <div class="nc-dictado-encabezado">
+                <div>
+                    <strong><i class="fa-solid @(dictando ? "fa-microphone-lines" : "fa-microphone-slash")"></i> Dictado por voz — @TitulosPaso[pasoActual - 1]</strong>
+                    <p class="fmt-ayuda">Pulsa Dictar y menciona el nombre del campo antes del dato.</p>
+                </div>
+                <div class="nc-dictado-botones">
+                    <button type="button" class="fmt-btn" disabled="@(dictadoSoportadoVerificado && !dictadoSoportado)" @onclick="AlternarDictadoAsync">
+                        <i class="fa-solid fa-microphone"></i> @(dictando ? "Detener" : "Dictar")
+                    </button>
+                    <button type="button" class="fmt-btn-secundario" disabled="@(string.IsNullOrWhiteSpace(transcripcionDictado))" @onclick="CargarCampos">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Cargar campos
+                    </button>
+                    <button type="button" class="fmt-icono-btn" title="Borrar" @onclick="LimpiarDictado">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+
+            @if (dictadoSoportadoVerificado && !dictadoSoportado)
+            {
+                <p class="fmt-ayuda" style="color:#c0392b">Dictado por voz no disponible en este navegador. Usa Chrome o Edge.</p>
+            }
+            else if (errorDictado is not null)
+            {
+                <p class="fmt-ayuda" style="color:#c0392b">@errorDictado</p>
+            }
+
+            @if (dictando || !string.IsNullOrWhiteSpace(transcripcionDictado))
+            {
+                <textarea class="fmt-textarea nc-dictado-transcripcion" @bind="transcripcionDictado" @bind:event="oninput"
+                          placeholder="El texto reconocido aparecerá aquí..."></textarea>
+            }
+
+            @if (mensajeDictado is not null)
+            {
+                <p class="fmt-ayuda">@mensajeDictado</p>
+            }
+
+            <p class="fmt-ayuda nc-dictado-ejemplo"><strong>Ejemplo:</strong> "@EjemploDictadoPasoActual()"</p>
+        </div>
+    }
+
+    @if (pasoActual == 1)
+    {
+        <div class="fmt-row">
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Causal de contingencia *</label>
+                <div class="nc-causal-fila">
+                    <select class="fmt-select" @bind="form.Causal">
+                        <option value="">Selecciona la causal</option>
+                        @foreach (var c in parametricas["CAUSAL"])
+                        {
+                            <option value="@c.Codigo">@c.Valor</option>
+                        }
+                    </select>
+                    <button type="button" class="fmt-btn-secundario nc-causal-crear" @onclick="AbrirModalCausal">
+                        <i class="fa-solid fa-plus"></i> Crear
+                    </button>
+                </div>
+            </div>
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Descripción de la contingencia *</label>
+                <textarea class="fmt-textarea" maxlength="500" @bind="form.CausalDescripcion" @bind:event="oninput"
+                          placeholder="Describe brevemente las circunstancias que generaron la contingencia..."></textarea>
+                <p class="fmt-ayuda" style="text-align:right">@form.CausalDescripcion.Length/500</p>
+            </div>
+        </div>
+    }
+    else if (pasoActual == 2)
+    {
+        <div class="fmt-row">
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Código de Habilitación - IPS</label>
+                <input class="fmt-input" list="dl-ips" value="@form.IpsTexto" @oninput="OnIpsInputAsync" placeholder="@(parametrosCia.NitPrestadores is null ? "Ingresar" : "Escriba el código o el nombre de la sede")" />
+                <datalist id="dl-ips">@foreach (var o in opcionesIps) { <option value="@($"{o.Codigo}|{o.Nombre}")"></option> }</datalist>
+            </div>
+        </div>
+
+        @if (detalleIps is not null)
+        {
+            <div class="nc-info-panel">
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">NIT</span>
+                    <span class="nc-info-valor">@(detalleIps.Nit ?? "—")</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Cód. Habilitación</span>
+                    <span class="nc-info-valor">@detalleIps.Codigo</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Departamento</span>
+                    <span class="nc-info-valor">@(detalleIps.Departamento ?? "—")</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Municipio</span>
+                    <span class="nc-info-valor">@(detalleIps.Municipio ?? "—")</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Clase de prestador</span>
+                    <span class="nc-info-valor">@(detalleIps.Clase ?? "—")</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Estado</span>
+                    <span class="nc-info-valor">@(detalleIps.Habilitado ? "Habilitado" : "No habilitado")</span>
+                </div>
+            </div>
+        }
+    }
+    else if (pasoActual == 3)
+    {
+        <div class="fmt-row">
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Profesional tratante</label>
+                <input class="fmt-input" list="dl-profesional" value="@form.ProfesionalTexto" @oninput="OnProfesionalInputAsync" placeholder="Documento o nombre" />
+                <datalist id="dl-profesional">@foreach (var p in opcionesProfesional) { <option value="@($"{p.NoIdentificacion}|{p.NombreCompleto}|{p.Profesion}")"></option> }</datalist>
+            </div>
+        </div>
+
+        @if (detalleProfesional is not null)
+        {
+            <div class="nc-info-panel">
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Documento</span>
+                    <span class="nc-info-valor">@detalleProfesional.TipoDoc @detalleProfesional.NoIdentificacion</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Profesión</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(detalleProfesional.Profesion) ? "—" : detalleProfesional.Profesion)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Sede</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(detalleProfesional.Sede) ? "—" : detalleProfesional.Sede)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Servicio</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(detalleProfesional.Servicio) ? "—" : detalleProfesional.Servicio)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Correo</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(detalleProfesional.CorreoElectronico) ? "—" : detalleProfesional.CorreoElectronico)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Celular</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(detalleProfesional.Celular) ? "—" : detalleProfesional.Celular)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Estado</span>
+                    <span class="nc-info-valor">@detalleProfesional.EstadoDesc</span>
+                </div>
+            </div>
+        }
+    }
+    else if (pasoActual == 4)
+    {
+        <div class="fmt-row">
+            <div class="fmt-campo">
+                <label class="fmt-label">Tipo de documento</label>
+                <select class="fmt-select" @bind="form.PacienteTipoDoc">
+                    <option value="CC">Cédula de ciudadanía</option>
+                    <option value="CE">Cédula de extranjería</option>
+                    <option value="TI">Tarjeta de identidad</option>
+                    <option value="RC">Registro civil</option>
+                    <option value="NV">Certificado de nacido vivo</option>
+                    <option value="MS">Menor sin Identificación</option>
+                    <option value="AS">Adulto sin Identificación</option>
+                    <option value="PA">Pasaporte</option>
+                    <option value="CD">Carné diplomático</option>
+                    <option value="PE">Permiso Especial de Permanencia</option>
+                    <option value="PT">Permiso de Protección Temporal</option>
+                    <option value="SC">Salvo conducto de permanencia</option>
+                </select>
+            </div>
+            <div class="fmt-campo">
+                <label class="fmt-label">Número de documento</label>
+                <input class="fmt-input" @bind="form.PacienteNumDoc" @bind:event="oninput" />
+            </div>
+            @if (!AfiliadosManual)
+            {
+                <div class="fmt-campo nc-buscar-campo">
+                    <button type="button" class="fmt-btn" disabled="@buscandoAfiliado" @onclick="BuscarAfiliadoAsync">
+                        <i class="fa-solid fa-magnifying-glass"></i> @(buscandoAfiliado ? "Buscando..." : "Buscar")
+                    </button>
+                </div>
+            }
+        </div>
+
+        @if (mensajeAfiliado is not null)
+        {
+            <p class="fmt-ayuda" style="color:#c0392b">@mensajeAfiliado</p>
+        }
+
+        @* Modo manual (CIA sin web service de afiliados, parámetro AFILIADOS_ORIGEN=MANUAL en
+           DQS_MIP_CIA_PARAMETROS): el usuario digita los datos del paciente. *@
+        @if (AfiliadosManual)
+        {
+            <div class="fmt-row" style="margin-top:1rem">
+                <div class="fmt-campo">
+                    <label class="fmt-label">Nombres *</label>
+                    <input class="fmt-input" maxlength="100" @bind="form.PacienteNombres" @bind:event="oninput" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Apellidos *</label>
+                    <input class="fmt-input" maxlength="100" @bind="form.PacienteApellidos" @bind:event="oninput" />
+                </div>
+            </div>
+            <div class="fmt-row" style="margin-top:1rem">
+                <div class="fmt-campo">
+                    <label class="fmt-label">Sexo *</label>
+                    <select class="fmt-select" @bind="form.PacienteSexo">
+                        <option value="">Seleccionar</option>
+                        <option value="M">Masculino</option>
+                        <option value="F">Femenino</option>
+                    </select>
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Fecha de nacimiento *</label>
+                    <input type="date" class="fmt-input" max="@DateTime.Today.ToString("yyyy-MM-dd")" value="@form.PacienteFechaNacimiento" @onchange="e => form.PacienteFechaNacimiento = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Régimen</label>
+                    <select class="fmt-select" @bind="form.PacienteRegimen">
+                        <option value="">Seleccionar</option>
+                        <option value="Contributivo">Contributivo</option>
+                        <option value="Subsidiado">Subsidiado</option>
+                        <option value="Especial">Especial</option>
+                        <option value="Excepción">Excepción</option>
+                        <option value="Particular">Particular</option>
+                    </select>
+                </div>
+            </div>
+            <div class="fmt-row" style="margin-top:1rem">
+                <div class="fmt-campo">
+                    <label class="fmt-label">Municipio</label>
+                    <input class="fmt-input" maxlength="100" @bind="form.PacienteMunicipio" @bind:event="oninput" placeholder="Ej. Bogotá, Cundinamarca" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Teléfono</label>
+                    <input class="fmt-input" maxlength="20" inputmode="tel" @bind="form.PacienteTelefono" @bind:event="oninput" />
+                </div>
+            </div>
+        }
+
+        @if (!AfiliadosManual && afiliadoEncontrado)
+        {
+            <div class="nc-info-panel">
+                <div class="nc-info-item nc-info-item-ancho">
+                    <span class="nc-info-etiqueta">Paciente</span>
+                    <span class="nc-info-valor">@form.PacienteNombres @form.PacienteApellidos</span>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(parametrosCia.EntidadAfiliados))
+                {
+                    <div class="nc-info-item">
+                        <span class="nc-info-etiqueta">EPS</span>
+                        <span class="nc-info-valor">@parametrosCia.EntidadAfiliados</span>
+                    </div>
+                }
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Régimen</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(form.PacienteRegimen) ? "—" : form.PacienteRegimen)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Sexo</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(form.PacienteSexo) ? "—" : form.PacienteSexo)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Nacimiento</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(form.PacienteFechaNacimiento) ? "—" : form.PacienteFechaNacimiento)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Municipio</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(form.PacienteMunicipio) ? "—" : form.PacienteMunicipio)</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Teléfono</span>
+                    <span class="nc-info-valor">@(string.IsNullOrEmpty(form.PacienteTelefono) ? "—" : form.PacienteTelefono)</span>
+                </div>
+            </div>
+        }
+
+        @if (AfiliadosManual || afiliadoEncontrado)
+        {
+            <div class="fmt-row" style="margin-top:1.25rem">
+                <div class="fmt-campo">
+                    <label class="fmt-label">Fecha de atención *</label>
+                    <input type="date" class="fmt-input" value="@form.FechaAtencion" @onchange="e => form.FechaAtencion = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Hora *</label>
+                    <input type="time" class="fmt-input" value="@form.HoraAtencion" @onchange="e => form.HoraAtencion = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="fmt-campo fmt-campo-ancho">
+                    <label class="fmt-label">Ámbito de atención (MIPRES) *</label>
+                    <select class="fmt-select" @bind="form.AmbitoAtencionCodigo">
+                        <option value="">Seleccionar</option>
+                        @foreach (var a in ambitosAtencion)
+                        {
+                            <option value="@a.Codigo">@a.Codigo @a.Descripcion</option>
+                        }
+                    </select>
+                </div>
+            </div>
+        }
+    }
+    else if (pasoActual == 5)
+    {
+        <div class="fmt-row">
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Diagnóstico (CIE-10)</label>
+                <input class="fmt-input" list="dl-cie10" value="@form.DiagnosticoTexto" @oninput="OnDiagnosticoInputAsync" placeholder="Código o descripción" />
+                <datalist id="dl-cie10">@foreach (var d in opcionesCie10) { <option value="@($"{d.Codigo}|{d.Descripcion}")"></option> }</datalist>
+            </div>
+        </div>
+
+        @if (detalleDiagnostico is not null)
+        {
+            <div class="nc-info-panel">
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Código CIE-10</span>
+                    <span class="nc-info-valor">@detalleDiagnostico.Codigo</span>
+                </div>
+                <div class="nc-info-item">
+                    <span class="nc-info-etiqueta">Aplica a</span>
+                    <span class="nc-info-valor">@InterpretarMarcaCie10(detalleDiagnostico.Marca)</span>
+                </div>
+                <div class="nc-info-item nc-info-item-ancho">
+                    <span class="nc-info-etiqueta">Descripción</span>
+                    <span class="nc-info-valor">@detalleDiagnostico.Descripcion</span>
+                </div>
+            </div>
+        }
+
+        <div class="fmt-row" style="margin-top:1.25rem">
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Diagnóstico relacionado 1</label>
+                <input class="fmt-input" list="dl-cie10-rel1" value="@form.DiagnosticoRel1Texto" @oninput="OnDiagnosticoRel1InputAsync" placeholder="Código o descripción (opcional)" />
+                <datalist id="dl-cie10-rel1">@foreach (var d in opcionesCie10Rel1) { <option value="@($"{d.Codigo}|{d.Descripcion}")"></option> }</datalist>
+            </div>
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Diagnóstico relacionado 2</label>
+                <input class="fmt-input" list="dl-cie10-rel2" value="@form.DiagnosticoRel2Texto" @oninput="OnDiagnosticoRel2InputAsync" placeholder="Código o descripción (opcional)" />
+                <datalist id="dl-cie10-rel2">@foreach (var d in opcionesCie10Rel2) { <option value="@($"{d.Codigo}|{d.Descripcion}")"></option> }</datalist>
+            </div>
+        </div>
+    }
+    else if (pasoActual == 6)
+    {
+        @if (tecnologiasAgregadas.Count > 0)
+        {
+            <div class="nc-tec-agregadas">
+                <p class="fmt-ayuda"><strong>Tecnologías ya agregadas:</strong></p>
+                @for (var i = 0; i < tecnologiasAgregadas.Count; i++)
+                {
+                    var indice = i;
+                    var t = tecnologiasAgregadas[i];
+                    <p class="fmt-ayuda">
+                        @(i + 1). <strong>@t.TipoTecnologia</strong> — @ResumenTecnologia.Detalle(t)
+                        <button type="button" class="fmt-btn-secundario" @onclick="() => QuitarTecnologia(indice)">Quitar</button>
+                    </p>
+                }
+                <p class="fmt-ayuda">Elija el tipo de la siguiente tecnología:</p>
+            </div>
+        }
+        <div class="nc-tec-grid">
+            @foreach (var t in TiposTecnologia)
+            {
+                <div class="nc-tec-tarjeta @(form.TipoTecnologia == t.Valor ? "seleccionada" : "")" @onclick="() => SeleccionarTipoTecnologia(t.Valor)">
+                    <strong>@t.Titulo</strong>
+                    <p>@t.Descripcion</p>
+                </div>
+            }
+        </div>
+    }
+    else if (pasoActual == 7)
+    {
+        <div class="fmt-row">
+            @if (form.TipoTecnologia == "Medicamento")
+            {
+                <div class="fmt-campo">
+                    <label class="fmt-label">Principio activo / DCI *</label>
+                    <input class="fmt-input" list="dl-dci" value="@form.TecPrincipioActivo" @oninput="OnPrincipioActivoInputAsync" placeholder="Buscar denominación común internacional" />
+                    <datalist id="dl-dci">@foreach (var d in opcionesDci) { <option value="@d"></option> }</datalist>
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Concentración *</label>
+                    <input class="fmt-input" @bind="form.TecDosis" @bind:event="oninput" placeholder="Ej. 50 mg" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Forma farmacéutica (MIPRES) *</label>
+                    <select class="fmt-select" @bind="form.TecFormaFarmaceutica">
+                        <option value="">Selecciona forma</option>
+                        @foreach (var f in formasFarmaceuticas) { <option value="@f.Descripcion">@f.Descripcion</option> }
+                    </select>
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Vía de administración (MIPRES) *</label>
+                    <select class="fmt-select" @bind="form.TecViaAdministracion">
+                        <option value="">Selecciona vía</option>
+                        @foreach (var v in viasAdministracion) { <option value="@v.Descripcion">@v.Descripcion</option> }
+                    </select>
+                </div>
+            }
+            else if (form.TipoTecnologia is "Procedimiento" or "Dispositivo" or "ProductoNutricional" or "ServicioComplementario")
+            {
+                <div class="fmt-campo fmt-campo-ancho">
+                    <label class="fmt-label">@EtiquetaCodigoTecnologia()</label>
+                    <input class="fmt-input" list="dl-codigos-tec" value="@form.TecBusquedaTexto" @oninput="OnTecBusquedaInputAsync" placeholder="Código o descripción" />
+                    <datalist id="dl-codigos-tec">@foreach (var c in opcionesCodigosTecnologia) { <option value="@($"{c.Codigo}|{c.Descripcion}")"></option> }</datalist>
+                </div>
+
+                @if (detalleCodigoTecnologia is not null)
+                {
+                    <div class="nc-info-panel">
+                        <div class="nc-info-item">
+                            <span class="nc-info-etiqueta">Código</span>
+                            <span class="nc-info-valor">@detalleCodigoTecnologia.Codigo</span>
+                        </div>
+                        <div class="nc-info-item nc-info-item-ancho">
+                            <span class="nc-info-etiqueta">Descripción</span>
+                            <span class="nc-info-valor">@detalleCodigoTecnologia.Descripcion</span>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                <p class="fmt-vacio">Seleccione primero el tipo de tecnología en el paso anterior.</p>
+            }
+        </div>
+    }
+    else if (pasoActual == 8)
+    {
+        @if (form.TipoTecnologia == "Medicamento")
+        {
+            <div class="fmt-row">
+                <div class="fmt-campo">
+                    <label class="fmt-label">Dosis *</label>
+                    <input class="fmt-input" @bind="form.PosCantidadFormulada" @bind:event="oninput" placeholder="Cantidad (ej. 500)" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">&nbsp;</label>
+                    <select class="fmt-select" @bind="form.PosCantidadFormuladaUnidad">
+                        <option value="">Unidad</option>
+                        @foreach (var u in unidadesDosis) { <option value="@u.Descripcion">@u.Descripcion</option> }
+                    </select>
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Frecuencia * (MIPRES)</label>
+                    <input class="fmt-input" @bind="form.PosCadaFrecuencia" @bind:event="oninput" placeholder="Ej. 8" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">&nbsp;</label>
+                    <select class="fmt-select" @bind="form.PosFrecuencia">
+                        <option value="">Seleccionar</option>
+                        @foreach (var u in unidadesFrecuencia) { <option value="@u.Descripcion">@u.Descripcion</option> }
+                    </select>
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Cantidad total *</label>
+                    <input class="fmt-input" @bind="form.PosCantidadTotal" @bind:event="oninput" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Duración (número)</label>
+                    <input class="fmt-input" @bind="form.PosDuracionTratamiento" @bind:event="oninput" placeholder="Ej. 5" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Unidad de tiempo (MIPRES)</label>
+                    <select class="fmt-select" @bind="form.PosDuracionUnidad">
+                        <option value="">Seleccionar</option>
+                        @foreach (var u in unidadesFrecuencia) { <option value="@u.Descripcion">@u.Descripcion</option> }
+                    </select>
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Indicación especial (MIPRES)</label>
+                    <select class="fmt-select" @bind="form.PosIndicacionEspecial">
+                        <option value="">Seleccionar</option>
+                        @foreach (var v in CatalogosPosologia.IndicacionEspecial) { <option value="@v">@v</option> }
+                    </select>
+                </div>
+                <div class="fmt-campo fmt-campo-ancho">
+                    <label class="fmt-label">Indicaciones adicionales</label>
+                    <textarea class="fmt-textarea" rows="3" @bind="form.PosIndicacionesAdicionales" @bind:event="oninput" placeholder="Notas adicionales (opcional)"></textarea>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="fmt-row">
+                <div class="fmt-campo">
+                    <label class="fmt-label">Cantidad total *</label>
+                    <input class="fmt-input" @bind="form.PosCantidadTotal" @bind:event="oninput" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Duración (número)</label>
+                    <input class="fmt-input" @bind="form.PosDuracionTratamiento" @bind:event="oninput" placeholder="Ej. 5" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Unidad de tiempo (MIPRES)</label>
+                    <select class="fmt-select" @bind="form.PosDuracionUnidad">
+                        <option value="">Seleccionar</option>
+                        @foreach (var v in CatalogosPosologia.DuracionUnidad) { <option value="@v">@v</option> }
+                    </select>
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Indicación especial (MIPRES)</label>
+                    <select class="fmt-select" @bind="form.PosIndicacionEspecial">
+                        <option value="">Opcional — selecciona indicación</option>
+                        @foreach (var v in CatalogosPosologia.IndicacionEspecial) { <option value="@v">@v</option> }
+                    </select>
+                </div>
+                <div class="fmt-campo fmt-campo-ancho">
+                    <label class="fmt-label">Indicaciones adicionales</label>
+                    <textarea class="fmt-textarea" rows="3" @bind="form.PosIndicacionesAdicionales" @bind:event="oninput" placeholder="Notas adicionales (opcional)"></textarea>
+                </div>
+            </div>
+        }
+    }
+    else if (pasoActual == 9)
+    {
+        <div class="fmt-row">
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Justificación técnica</label>
+                <textarea class="fmt-textarea" style="min-height:8rem" @bind="form.JustificacionTecnica" @bind:event="oninput"></textarea>
+            </div>
+        </div>
+        <div class="fmt-acciones">
+            <button type="button" class="fmt-btn-secundario" @onclick="AgregarOtraTecnologiaAsync">+ Agregar otra tecnología</button>
+        </div>
+    }
+    else if (pasoActual == 10)
+    {
+        <div class="fmt-row">
+            <div class="fmt-campo fmt-campo-ancho">
+                <label class="fmt-label">Soportes (.pdf, .png, .jpg, .jpeg, .tiff, .docx, .doc, .xlsx)</label>
+                <div class="fmt-file">
+                    <InputFile OnChange="OnSoportesSeleccionadosAsync" multiple accept=".pdf,.png,.jpg,.jpeg,.tiff,.docx,.doc,.xlsx" />
+                </div>
+                @if (soportes.Count > 0)
+                {
+                    <p class="fmt-ayuda">@soportes.Count archivo(s) seleccionado(s): @string.Join(", ", soportes.Select(s => s.NombreOriginal))</p>
+                }
+            </div>
+
+            <div class="fmt-campo-ancho">
+                <label class="fmt-label">Firma</label>
+                <div class="nc-firma-tabs">
+                    <button type="button" class="@(modoFirma == "dibujo" ? "fmt-btn" : "fmt-btn-secundario")" @onclick="CambiarADibujoAsync">Dibujar</button>
+                    <button type="button" class="@(modoFirma == "archivo" ? "fmt-btn" : "fmt-btn-secundario")" @onclick="CambiarAArchivoAsync">Subir archivo</button>
+                </div>
+
+                @if (modoFirma == "dibujo")
+                {
+                    <div class="nc-firma-canvas-wrap">
+                        <canvas id="nc-canvas-firma" width="400" height="150"></canvas>
+                    </div>
+                    <div class="fmt-acciones">
+                        <button type="button" class="fmt-btn-secundario" @onclick="LimpiarDibujoAsync">Limpiar</button>
+                        <button type="button" class="fmt-btn-secundario" @onclick="GuardarDibujoAsync">Usar este dibujo</button>
+                    </div>
+                }
+                else
+                {
+                    <InputFile class="fmt-file" OnChange="OnArchivoFirmaSeleccionadoAsync" accept=".jpg,.jpeg,.png,.bmp,.gif" />
+                }
+
+                @if (firmaDataUrl is not null)
+                {
+                    <p class="fmt-ayuda">Firma actual:</p>
+                    <img src="@firmaDataUrl" alt="Firma" class="nc-firma-preview" />
+                }
+
+                <p class="fmt-ayuda" style="color:#b7791f">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    Firma capturada localmente — integración con proveedor de firma electrónica avanzada (FEA) pendiente.
+                </p>
+            </div>
+        </div>
+    }
+    else if (pasoActual == 11)
+    {
+        <div class="nc-revision">
+            <p><strong>Causal:</strong> @NombreCausalSeleccionada()</p>
+            <p><strong>Descripción:</strong> @form.CausalDescripcion</p>
+            <p><strong>IPS:</strong> @TextoLegible(form.IpsTexto)</p>
+            <p><strong>Profesional tratante:</strong> @ProfesionalLegible()</p>
+            <p><strong>Paciente:</strong> @form.PacienteTipoDoc @form.PacienteNumDoc — @form.PacienteNombres @form.PacienteApellidos</p>
+            <p><strong>Atención:</strong> @form.FechaAtencion @form.HoraAtencion — @ambitosAtencion.FirstOrDefault(a => a.Codigo == form.AmbitoAtencionCodigo).Descripcion</p>
+            <p><strong>Diagnóstico:</strong> @TextoLegible(form.DiagnosticoTexto)</p>
+            @if (!string.IsNullOrWhiteSpace(form.DiagnosticoRel1Texto))
+            {
+                <p><strong>Diagnóstico relacionado 1:</strong> @TextoLegible(form.DiagnosticoRel1Texto)</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(form.DiagnosticoRel2Texto))
+            {
+                <p><strong>Diagnóstico relacionado 2:</strong> @TextoLegible(form.DiagnosticoRel2Texto)</p>
+            }
+            @{ var todas = TodasLasTecnologias(); }
+            @for (var i = 0; i < todas.Count; i++)
+            {
+                var indice = i;
+                var t = todas[i];
+                <div class="nc-revision-tecnologia">
+                    <p><strong>Tecnología @(i + 1) (@t.TipoTecnologia):</strong> @ResumenTecnologia.Detalle(t)
+                        @if (i < tecnologiasAgregadas.Count)
+                        {
+                            <button type="button" class="fmt-btn-secundario" @onclick="() => QuitarTecnologia(indice)">Quitar</button>
+                        }
+                    </p>
+                    <p><strong>Posología:</strong> @ResumenTecnologia.Posologia(t)</p>
+                    @if (!string.IsNullOrWhiteSpace(t.PosIndicacionesAdicionales))
+                    {
+                        <p><strong>Indicaciones adicionales:</strong> @t.PosIndicacionesAdicionales</p>
+                    }
+                    <p><strong>Justificación técnica:</strong> @t.JustificacionTecnica</p>
+                </div>
+            }
+            <div class="fmt-acciones">
+                <button type="button" class="fmt-btn-secundario" @onclick="AgregarOtraTecnologiaAsync">+ Agregar otra tecnología</button>
+            </div>
+            <p><strong>Soportes:</strong> @(soportes.Count == 0 ? "Ninguno" : string.Join(", ", soportes.Select(s => s.NombreOriginal)))</p>
+            <p><strong>Firma:</strong> @(firmaDataUrl is not null ? "Capturada" : "Sin capturar")</p>
+            <p class="fmt-ayuda" style="color:#b7791f">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                Al confirmar, la firma queda marcada como pendiente de integración con un proveedor de FEA real.
+            </p>
+        </div>
+    }
+
+    <div class="fmt-acciones">
+        <button type="button" class="fmt-btn-secundario" disabled="@(pasoActual == 1)" @onclick="PasoAnterior">Anterior</button>
+        @if (pasoActual < TitulosPaso.Length)
+        {
+            <button type="button" class="fmt-btn" @onclick="PasoSiguienteAsync">Siguiente</button>
+        }
+        else
+        {
+            <button type="button" class="fmt-btn" disabled="@enviando" @onclick="ConfirmarAsync">@(enviando ? "Registrando..." : "Confirmar y registrar")</button>
+        }
+    </div>
+</div>
+
+@if (mostrarModalCausal)
+{
+    <div class="fmt-modal-fondo" @onclick="CerrarModalCausal">
+        <div class="fmt-modal" @onclick:stopPropagation="true">
+            <div class="fmt-modal-encabezado">
+                <h3>Nueva causal</h3>
+                <button type="button" class="fmt-modal-cerrar" @onclick="CerrarModalCausal">&times;</button>
+            </div>
+            <div class="fmt-modal-cuerpo">
+                @if (mensajeModalCausal is not null)
+                {
+                    <p class="fmt-ayuda" style="color:#c0392b">@mensajeModalCausal</p>
+                }
+                <div class="fmt-campo fmt-campo-ancho">
+                    <label class="fmt-label">Nombre de la causal</label>
+                    <input class="fmt-input" @bind="nuevaCausalTexto" @bind:event="oninput" placeholder="Ej. Falla eléctrica del generador" />
+                </div>
+            </div>
+            <div class="fmt-modal-acciones fmt-acciones">
+                <button type="button" class="fmt-btn" disabled="@guardandoCausal" @onclick="GuardarNuevaCausalAsync">@(guardandoCausal ? "Guardando..." : "Guardar")</button>
+                <button type="button" class="fmt-btn-secundario" @onclick="CerrarModalCausal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] TitulosPaso =
+        ["Causal", "IPS", "Profesional", "Paciente", "Diagnóstico", "Tipo tecnología",
+         "Detalle tecnología", "Posología", "Justificación", "Soportes y firma", "Revisión"];
+
+    private static readonly string[] ExtensionesSoportesPermitidas =
+        [".png", ".jpg", ".jpeg", ".tiff", ".docx", ".doc", ".xlsx", ".pdf"];
+
+    private int pasoActual = 1;
+    private string? mensaje;
+    private bool enviando;
+
+    private FormularioNuevaContingencia form = new();
+    private ILookup<string, ParametricaValor> parametricas = Enumerable.Empty<ParametricaValor>().ToLookup(_ => "");
+
+    private IReadOnlyList<PrestadorHabilitacion> opcionesIps = [];
+    private DetallePrestador? detalleIps;
+    private ProfesionalMip? detalleProfesional;
+    private Cie10Fila? detalleDiagnostico;
+    private Cie10Fila? detalleDiagnosticoRel1;
+    private Cie10Fila? detalleDiagnosticoRel2;
+    private List<(string Codigo, string Descripcion)> ambitosAtencion = [];
+    // Parámetros de la CIA de la sesión (DQS_MIP_CIA_PARAMETROS): decide si el paso 4 consulta el
+    // web service de afiliados o muestra el formulario manual. Sin parámetro => manual.
+    private ParametrosCia parametrosCia = new(OrigenAfiliados.Manual, null);
+    private bool AfiliadosManual => parametrosCia.OrigenAfiliados == OrigenAfiliados.Manual;
+    private bool buscandoAfiliado;
+    private bool afiliadoEncontrado;
+    private string? mensajeAfiliado;
+    private static readonly (string Valor, string Titulo, string Descripcion)[] TiposTecnologia =
+    [
+        ("Medicamento", "Medicamento", "DCI, concentración, vía, dosis, frecuencia y duración."),
+        ("Procedimiento", "Procedimiento", "Código CUPS, cantidad, frecuencia y justificación."),
+        ("Dispositivo", "Dispositivo médico", "Código del dispositivo, cantidad e indicaciones."),
+        ("ProductoNutricional", "Producto nutricional", "Producto, presentación y justificación nutricional."),
+        ("ServicioComplementario", "Servicio complementario", "Servicio, frecuencia, duración y justificación."),
+    ];
+
+    private List<ProfesionalMip> opcionesProfesional = [];
+    private IReadOnlyList<Cie10Fila> opcionesCie10 = [];
+    private IReadOnlyList<Cie10Fila> opcionesCie10Rel1 = [];
+    private IReadOnlyList<Cie10Fila> opcionesCie10Rel2 = [];
+    private IReadOnlyList<CodigoFila> opcionesCodigosTecnologia = [];
+    private CodigoFila? detalleCodigoTecnologia;
+    private List<(string Codigo, string Descripcion)> formasFarmaceuticas = [];
+    private List<(string Codigo, string Descripcion)> viasAdministracion = [];
+    private List<(string Codigo, string Descripcion)> unidadesDosis = [];
+    private List<(string Codigo, string Descripcion)> unidadesFrecuencia = [];
+    private IReadOnlyList<string> opcionesDci = [];
+    private bool principioActivoValido;
+
+    private readonly List<(string NombreOriginal, byte[] Contenido)> soportes = [];
+    private string modoFirma = "dibujo";
+    private string? firmaDataUrl;
+    private byte[]? firmaArchivoBytes;
+    private string? firmaArchivoExtension;
+
+    // ---- Dictado por voz (Web Speech API, ver wwwroot/js/dictado-voz.js) ----
+    private bool dictadoSoportado = true;
+    private bool dictadoSoportadoVerificado;
+    private bool dictando;
+    private string transcripcionDictado = "";
+    private string? errorDictado;
+    private string? mensajeDictado;
+    private DotNetObjectReference<NuevaContingencia>? dictadoRef;
+
+    // ---- Modal "Nueva causal" (paso 1) ----
+    private bool mostrarModalCausal;
+    private string nuevaCausalTexto = "";
+    private string? mensajeModalCausal;
+    private bool guardandoCausal;
+
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? EstadoAutenticacion { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        parametricas = await ParametricasService.CargarAsync();
+
+        var (cia, _) = await ObtenerUsuarioAsync();
+        parametrosCia = await CiaParametrosService.ObtenerAsync(cia);
+        var dtCruzar = await FiltrosRepository.ConsultarAsync(cia, 138);
+        ambitosAtencion = dtCruzar.AsEnumerable()
+            .Where(f => string.Equals(Convert.ToString(f["CAMPO"]), "CodAmbAte", StringComparison.OrdinalIgnoreCase))
+            .Select(f => (Codigo: Convert.ToString(f["CODIGO"]) ?? "", Descripcion: Convert.ToString(f["DESCRIPCION"]) ?? ""))
+            .DistinctBy(a => a.Codigo)
+            .OrderBy(a => a.Codigo)
+            .ToList();
+
+        // Paso 7 (Medicamento) — Forma farmacéutica y Vía de administración (MIPRES) vienen
+        // del mismo DataTable de DQS_MIP_CRUZAR ya cargado arriba (CAMPO='CodFF'/'CodVA'),
+        // sin otra consulta.
+        formasFarmaceuticas = dtCruzar.AsEnumerable()
+            .Where(f => string.Equals(Convert.ToString(f["CAMPO"]), "CodFF", StringComparison.OrdinalIgnoreCase))
+            .Select(f => (Codigo: Convert.ToString(f["CODIGO"]) ?? "", Descripcion: Convert.ToString(f["DESCRIPCION"]) ?? ""))
+            .DistinctBy(a => a.Descripcion)
+            .OrderBy(a => a.Descripcion)
+            .ToList();
+        viasAdministracion = dtCruzar.AsEnumerable()
+            .Where(f => string.Equals(Convert.ToString(f["CAMPO"]), "CodVA", StringComparison.OrdinalIgnoreCase))
+            .Select(f => (Codigo: Convert.ToString(f["CODIGO"]) ?? "", Descripcion: Convert.ToString(f["DESCRIPCION"]) ?? ""))
+            .DistinctBy(a => a.Descripcion)
+            .OrderBy(a => a.Descripcion)
+            .ToList();
+
+        // Paso 8 (Posología, Medicamento) — Unidad de la dosis (CAMPO='DosisUM', ej. mg, ml,
+        // UI) y Unidad de tiempo/frecuencia (CAMPO='CODFREADMON', 8 valores MIPRES: Minuto(s)
+        // .. Única), también del mismo DataTable ya cargado arriba.
+        unidadesDosis = dtCruzar.AsEnumerable()
+            .Where(f => string.Equals(Convert.ToString(f["CAMPO"]), "DosisUM", StringComparison.OrdinalIgnoreCase))
+            .Select(f => (Codigo: Convert.ToString(f["CODIGO"]) ?? "", Descripcion: Convert.ToString(f["DESCRIPCION"]) ?? ""))
+            .DistinctBy(a => a.Descripcion)
+            .OrderBy(a => a.Descripcion)
+            .ToList();
+        unidadesFrecuencia = dtCruzar.AsEnumerable()
+            .Where(f => string.Equals(Convert.ToString(f["CAMPO"]), "CODFREADMON", StringComparison.OrdinalIgnoreCase))
+            .Select(f => (Codigo: Convert.ToString(f["CODIGO"]) ?? "", Descripcion: Convert.ToString(f["DESCRIPCION"]) ?? ""))
+            .OrderBy(a => int.TryParse(a.Codigo, out var n) ? n : int.MaxValue)
+            .ToList();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            dictadoSoportado = await JS.InvokeAsync<bool>("ImperiumDictado.soportado");
+            dictadoSoportadoVerificado = true;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (dictadoRef is not null)
+        {
+            _ = JS.InvokeVoidAsync("ImperiumDictado.detener");
+            dictadoRef.Dispose();
+        }
+    }
+
+    private async Task<(string cia, string usuApp)> ObtenerUsuarioAsync()
+    {
+        var estado = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
+        var usuario = estado?.User;
+        return (usuario?.Cia() ?? "", usuario?.UsuApp() ?? "");
+    }
+
+    // ---- Varias tecnologías por contingencia ----
+    // Los pasos 6 a 9 (tipo, detalle, posología, justificación) se repiten por tecnología. Las
+    // ya cerradas viven en esta lista; la que se está capturando vive en `form` (Tec*/Pos*/
+    // TipoTecnologia/JustificacionTecnica) y es siempre la última al confirmar.
+    private readonly List<TecnologiaContingencia> tecnologiasAgregadas = [];
+
+    private TecnologiaContingencia ConstruirTecnologiaActual() => new(
+        form.TipoTecnologia,
+        NuloSiVacio(form.TecNombre), NuloSiVacio(form.TecCodigo), NuloSiVacio(form.TecPrincipioActivo), NuloSiVacio(form.TecFormaFarmaceutica),
+        NuloSiVacio(form.TecViaAdministracion), NuloSiVacio(form.TecDosis),
+        NuloSiVacio(form.PosTipoPrestacion), NuloSiVacio(form.PosCantidadFormulada), NuloSiVacio(form.PosCantidadFormuladaUnidad), NuloSiVacio(form.PosCadaFrecuencia),
+        NuloSiVacio(form.PosFrecuencia), NuloSiVacio(form.PosDuracionTratamiento), NuloSiVacio(form.PosDuracionUnidad),
+        NuloSiVacio(form.PosIndicacionEspecial), NuloSiVacio(form.PosCantidadTotal), NuloSiVacio(form.PosIndicadorRecurrencia),
+        NuloSiVacio(form.PosIndicacionesAdicionales),
+        form.JustificacionTecnica.Trim());
+
+    private List<TecnologiaContingencia> TodasLasTecnologias() => [.. tecnologiasAgregadas, ConstruirTecnologiaActual()];
+
+    // "Agregar otra tecnología": cierra la que se está capturando (exige que los pasos 6 a 9
+    // estén completos) y vuelve al paso 6 con todo en blanco.
+    private async Task AgregarOtraTecnologiaAsync()
+    {
+        for (var paso = 6; paso <= 9; paso++)
+        {
+            var error = ValidarPaso(paso);
+            if (error is not null)
+            {
+                mensaje = $"Complete la tecnología actual antes de agregar otra (paso {paso}): {error}";
+                await JS.InvokeVoidAsync("Tran", mensaje, "");
+                return;
+            }
+        }
+
+        tecnologiasAgregadas.Add(ConstruirTecnologiaActual());
+        form.TipoTecnologia = "";
+        form.JustificacionTecnica = "";
+        LimpiarCamposTecnologia();
+        mensaje = null;
+        await DetenerDictadoSiActivoAsync();
+        LimpiarEstadoDictado();
+        pasoActual = 6;
+    }
+
+    private void QuitarTecnologia(int indice)
+    {
+        if (indice >= 0 && indice < tecnologiasAgregadas.Count)
+        {
+            tecnologiasAgregadas.RemoveAt(indice);
+        }
+    }
+
+    // Cambiar de tipo de tecnología invalida cualquier código/búsqueda ya elegido para el paso
+    // 7 — sin este reseteo, si el usuario iba y volvía del paso 6, quedaba un código válido
+    // de un TipoServicio distinto (ej. Procedimiento) pasando la validación del nuevo tipo
+    // (ej. Producto Nutricional) sin haber buscado nada en el catálogo correcto.
+    private void SeleccionarTipoTecnologia(string valor)
+    {
+        if (form.TipoTecnologia == valor) return;
+        form.TipoTecnologia = valor;
+        LimpiarCamposTecnologia();
+    }
+
+    // Deja en blanco los campos de detalle (paso 7) y posología (paso 8) de la tecnología que
+    // se está capturando; el tipo (paso 6) y la justificación (paso 9) los maneja el llamador.
+    private void LimpiarCamposTecnologia()
+    {
+        form.TecBusquedaTexto = "";
+        form.TecCodigo = "";
+        form.TecNombre = "";
+        form.TecPrincipioActivo = "";
+        form.TecFormaFarmaceutica = "";
+        form.TecViaAdministracion = "";
+        form.TecDosis = "";
+        detalleCodigoTecnologia = null;
+        opcionesCodigosTecnologia = [];
+        opcionesDci = [];
+        principioActivoValido = false;
+
+        // El paso 8 (Posología) también cambia de forma según el tipo — el formulario
+        // simplificado de Procedimiento/Dispositivo/Producto Nutricional/Servicio
+        // complementario no comparte campos con el de Medicamento (que sigue pendiente de
+        // redefinir aparte). Se limpia todo Posología al cambiar de tipo para no arrastrar
+        // datos que ya no apliquen a la forma nueva.
+        form.PosTipoPrestacion = "";
+        form.PosCantidadFormulada = "";
+        form.PosCantidadFormuladaUnidad = "";
+        form.PosCadaFrecuencia = "";
+        form.PosFrecuencia = "";
+        form.PosDuracionTratamiento = "";
+        form.PosDuracionUnidad = "";
+        form.PosIndicacionEspecial = "";
+        form.PosCantidadTotal = "";
+        form.PosIndicadorRecurrencia = "";
+        form.PosIndicacionesAdicionales = "";
+    }
+
+    private string EtiquetaCodigoTecnologia() => form.TipoTecnologia switch
+    {
+        "Procedimiento" => "Código CUPS",
+        "Dispositivo" => "Código del dispositivo",
+        "ProductoNutricional" => "Código del producto nutricional",
+        "ServicioComplementario" => "Código del servicio complementario",
+        _ => "Código",
+    };
+
+    // Código corto real de DQS_MIP_CODIGOS.TipoServicio (P/D/N/S) — ver CodigosRepository.
+    private string TipoServicioParaBusqueda() => form.TipoTecnologia switch
+    {
+        "Procedimiento" => "P",
+        "Dispositivo" => "D",
+        "ProductoNutricional" => "N",
+        "ServicioComplementario" => "S",
+        _ => "",
+    };
+
+    private async Task OnTecBusquedaInputAsync(ChangeEventArgs e)
+    {
+        form.TecBusquedaTexto = e.Value?.ToString() ?? "";
+        var tipoServicio = TipoServicioParaBusqueda();
+
+        // El datalist arma el valor como "Codigo|Descripcion" — si tiene esa forma, ya se
+        // eligió una opción; se busca por el código para confirmar que existe realmente en
+        // DQS_MIP_CODIGOS (no se admite texto libre, mismo criterio de IPS/Profesional/
+        // Diagnóstico) y para volcar Código/Descripción a los campos reales del formulario.
+        var indice = form.TecBusquedaTexto.IndexOf('|');
+        if (indice > 0)
+        {
+            var codigo = form.TecBusquedaTexto[..indice].Trim();
+            opcionesCodigosTecnologia = [];
+            var encontrados = await CodigosService.BuscarAsync(parametrosCia.CodigosCatalogo, tipoServicio, codigo);
+            detalleCodigoTecnologia = encontrados.FirstOrDefault(c => c.Codigo == codigo);
+            form.TecCodigo = detalleCodigoTecnologia?.Codigo ?? "";
+            form.TecNombre = detalleCodigoTecnologia?.Descripcion ?? "";
+        }
+        else
+        {
+            detalleCodigoTecnologia = null;
+            form.TecCodigo = "";
+            form.TecNombre = "";
+            opcionesCodigosTecnologia = await CodigosService.BuscarAsync(parametrosCia.CodigosCatalogo, tipoServicio, form.TecBusquedaTexto);
+        }
+    }
+
+    // DQS_MIP_DCI no tiene código (son denominaciones DCI) — a diferencia de los demás
+    // campos de búsqueda, acá no hay forma "Codigo|Descripcion" que detectar; se verifica
+    // directamente si el texto actual existe tal cual en la tabla (DciService.ExisteAsync).
+    private async Task OnPrincipioActivoInputAsync(ChangeEventArgs e)
+    {
+        form.TecPrincipioActivo = e.Value?.ToString() ?? "";
+        opcionesDci = await DciService.BuscarAsync(form.TecPrincipioActivo);
+        principioActivoValido = await DciService.ExisteAsync(form.TecPrincipioActivo);
+    }
+
+    private string NombreCausalSeleccionada() =>
+        parametricas["CAUSAL"].FirstOrDefault(c => c.Codigo == form.Causal)?.Valor ?? form.Causal;
+
+    private void AbrirModalCausal()
+    {
+        nuevaCausalTexto = "";
+        mensajeModalCausal = null;
+        mostrarModalCausal = true;
+    }
+
+    private void CerrarModalCausal() => mostrarModalCausal = false;
+
+    private async Task GuardarNuevaCausalAsync()
+    {
+        if (string.IsNullOrWhiteSpace(nuevaCausalTexto))
+        {
+            mensajeModalCausal = "Ingrese el nombre de la causal.";
+            return;
+        }
+
+        guardandoCausal = true;
+        try
+        {
+            var resultado = await ParametricasService.CrearAsync("CAUSAL", nuevaCausalTexto.Trim());
+            if (!resultado.Exito)
+            {
+                mensajeModalCausal = resultado.Mensaje;
+                return;
+            }
+
+            parametricas = await ParametricasService.CargarAsync();
+            form.Causal = resultado.Creado!.Codigo;
+            mostrarModalCausal = false;
+        }
+        finally
+        {
+            guardandoCausal = false;
+        }
+    }
+
+    private async Task OnIpsInputAsync(ChangeEventArgs e)
+    {
+        form.IpsTexto = e.Value?.ToString() ?? "";
+
+        // El datalist arma el valor como "Codigo|Nombre" — si el texto actual tiene esa
+        // forma, es porque el usuario ya eligió una opción (no la sigue tecleando), así que
+        // se busca el detalle en vez de seguir buscando sugerencias.
+        var indice = form.IpsTexto.IndexOf('|');
+        if (indice > 0)
+        {
+            opcionesIps = [];
+            detalleIps = await FormatosService.ObtenerDetallePrestadorAsync(form.IpsTexto[..indice].Trim(), parametrosCia.NitPrestadores);
+        }
+        else
+        {
+            detalleIps = null;
+            opcionesIps = await FormatosService.BuscarPrestadoresAsync(form.IpsTexto, parametrosCia.NitPrestadores);
+        }
+    }
+
+    private async Task OnProfesionalInputAsync(ChangeEventArgs e)
+    {
+        form.ProfesionalTexto = e.Value?.ToString() ?? "";
+        var (cia, _) = await ObtenerUsuarioAsync();
+
+        // El datalist arma el valor como "Documento|Nombre|Profesion" — si el texto actual
+        // tiene esa forma, el usuario ya eligió una opción; se busca por el documento para
+        // traer el objeto completo (el datalist solo trae esos 3 campos, no sede/servicio/
+        // correo/celular/estado).
+        var partes = form.ProfesionalTexto.Split('|');
+        if (partes.Length >= 3)
+        {
+            opcionesProfesional = [];
+            var documento = partes[0].Trim();
+            var encontrados = await ProfesionalesService.ConsultarAsync(cia, documento, null, null, "1");
+            detalleProfesional = encontrados.FirstOrDefault(p => p.NoIdentificacion == documento);
+        }
+        else
+        {
+            detalleProfesional = null;
+            opcionesProfesional = string.IsNullOrWhiteSpace(form.ProfesionalTexto)
+                ? []
+                : await ProfesionalesService.ConsultarAsync(cia, form.ProfesionalTexto, null, null, "1");
+        }
+    }
+
+    private async Task OnDiagnosticoInputAsync(ChangeEventArgs e)
+    {
+        form.DiagnosticoTexto = e.Value?.ToString() ?? "";
+
+        // El datalist arma el valor como "Codigo|Descripcion" — si tiene esa forma, ya se
+        // eligió una opción; se busca por el código para recuperar también la Marca (el
+        // datalist no la trae en el texto).
+        var indice = form.DiagnosticoTexto.IndexOf('|');
+        if (indice > 0)
+        {
+            var codigo = form.DiagnosticoTexto[..indice].Trim();
+            opcionesCie10 = [];
+            var encontrados = await Cie10Service.BuscarAsync(codigo);
+            detalleDiagnostico = encontrados.FirstOrDefault(d => d.Codigo == codigo);
+        }
+        else
+        {
+            detalleDiagnostico = null;
+            opcionesCie10 = await Cie10Service.BuscarAsync(form.DiagnosticoTexto);
+        }
+    }
+
+    // Diagnósticos relacionados (opcionales) — mismo catálogo CIE-10. No muestran panel
+    // informativo (el prototipo tampoco lo trae para estos dos), pero igual se re-consulta el
+    // código elegido: `detalleDiagnosticoRel1`/`2` no se pintan en la UI, solo sirven para que
+    // ValidarPasoActual confirme que el código realmente existe en DQS_REC_CARGUECIE10 (ver
+    // nota de AntiTextoLibre más abajo).
+    private async Task OnDiagnosticoRel1InputAsync(ChangeEventArgs e)
+    {
+        form.DiagnosticoRel1Texto = e.Value?.ToString() ?? "";
+        var indice = form.DiagnosticoRel1Texto.IndexOf('|');
+        if (indice > 0)
+        {
+            var codigo = form.DiagnosticoRel1Texto[..indice].Trim();
+            opcionesCie10Rel1 = [];
+            var encontrados = await Cie10Service.BuscarAsync(codigo);
+            detalleDiagnosticoRel1 = encontrados.FirstOrDefault(d => d.Codigo == codigo);
+        }
+        else
+        {
+            detalleDiagnosticoRel1 = null;
+            opcionesCie10Rel1 = await Cie10Service.BuscarAsync(form.DiagnosticoRel1Texto);
+        }
+    }
+
+    private async Task OnDiagnosticoRel2InputAsync(ChangeEventArgs e)
+    {
+        form.DiagnosticoRel2Texto = e.Value?.ToString() ?? "";
+        var indice = form.DiagnosticoRel2Texto.IndexOf('|');
+        if (indice > 0)
+        {
+            var codigo = form.DiagnosticoRel2Texto[..indice].Trim();
+            opcionesCie10Rel2 = [];
+            var encontrados = await Cie10Service.BuscarAsync(codigo);
+            detalleDiagnosticoRel2 = encontrados.FirstOrDefault(d => d.Codigo == codigo);
+        }
+        else
+        {
+            detalleDiagnosticoRel2 = null;
+            opcionesCie10Rel2 = await Cie10Service.BuscarAsync(form.DiagnosticoRel2Texto);
+        }
+    }
+
+    // Columna Marca de DQS_REC_CARGUECIE10 — solo 3 valores reales en toda la tabla
+    // (confirmado con SELECT DISTINCT), verificados empíricamente cruzando códigos
+    // conocidos: próstata siempre "M", embarazo siempre "F".
+    private static string InterpretarMarcaCie10(string marca) => marca switch
+    {
+        "A" => "Ambos sexos",
+        "F" => "Solo mujeres",
+        "M" => "Solo hombres",
+        _ => marca,
+    };
+
+    private async Task BuscarAfiliadoAsync()
+    {
+        mensajeAfiliado = null;
+        afiliadoEncontrado = false;
+
+        if (string.IsNullOrWhiteSpace(form.PacienteTipoDoc) || string.IsNullOrWhiteSpace(form.PacienteNumDoc))
+        {
+            mensajeAfiliado = "Seleccione el tipo e ingrese el número de documento.";
+            return;
+        }
+
+        buscandoAfiliado = true;
+        try
+        {
+            var resultado = await AfiliadoService.ConsultarAsync(form.PacienteTipoDoc, form.PacienteNumDoc.Trim(), parametrosCia.UrlAfiliados);
+            if (!resultado.Exito || resultado.Datos is null)
+            {
+                mensajeAfiliado = resultado.Mensaje ?? "No se encontró el afiliado.";
+                return;
+            }
+
+            var d = resultado.Datos;
+            form.PacienteNombres = d.Nombres;
+            form.PacienteApellidos = d.Apellidos;
+            form.PacienteSexo = d.Sexo;
+            form.PacienteFechaNacimiento = d.FechaNacimiento ?? "";
+            form.PacienteMunicipio = string.Join(", ", new[] { d.Municipio, d.Departamento }.Where(m => !string.IsNullOrWhiteSpace(m)));
+            form.PacienteTelefono = d.Telefono ?? "";
+            form.PacienteRegimen = d.Regimen ?? "";
+            afiliadoEncontrado = true;
+        }
+        finally
+        {
+            buscandoAfiliado = false;
+        }
+    }
+
+    private async Task PasoAnterior()
+    {
+        mensaje = null;
+        await DetenerDictadoSiActivoAsync();
+        LimpiarEstadoDictado();
+        if (pasoActual > 1) pasoActual--;
+    }
+
+    private async Task PasoSiguienteAsync()
+    {
+        var error = ValidarPasoActual();
+        if (error is not null)
+        {
+            mensaje = error;
+            await JS.InvokeVoidAsync("Tran", error, "");
+            return;
+        }
+
+        mensaje = null;
+        await DetenerDictadoSiActivoAsync();
+        LimpiarEstadoDictado();
+        pasoActual++;
+
+        if (pasoActual == 10)
+        {
+            await Task.Delay(50);
+            await JS.InvokeVoidAsync("ImperiumFirmaCanvas.iniciar", "nc-canvas-firma");
+        }
+    }
+
+    private string? ValidarPasoActual() => ValidarPaso(pasoActual);
+
+    // Paso 4 en modo manual (CIA sin web service de afiliados): el formulario reemplaza la
+    // consulta, así que los datos mínimos del paciente se exigen aquí.
+    private string? ValidarPacienteManual()
+    {
+        if (string.IsNullOrWhiteSpace(form.PacienteNumDoc)) return "Debe ingresar el número de documento del paciente.";
+        if (!form.PacienteNumDoc.Trim().All(char.IsLetterOrDigit)) return "El número de documento solo puede tener letras y números.";
+        if (string.IsNullOrWhiteSpace(form.PacienteNombres)) return "Debe ingresar los nombres del paciente.";
+        if (string.IsNullOrWhiteSpace(form.PacienteApellidos)) return "Debe ingresar los apellidos del paciente.";
+        if (string.IsNullOrWhiteSpace(form.PacienteSexo)) return "Debe seleccionar el sexo del paciente.";
+        if (!DateTime.TryParse(form.PacienteFechaNacimiento, out var nacimiento)) return "Debe ingresar la fecha de nacimiento del paciente.";
+        if (nacimiento.Date > DateTime.Today) return "La fecha de nacimiento no puede ser futura.";
+        if (string.IsNullOrWhiteSpace(form.FechaAtencion) || string.IsNullOrWhiteSpace(form.HoraAtencion)) return "Debe ingresar la fecha y hora de atención.";
+        if (string.IsNullOrWhiteSpace(form.AmbitoAtencionCodigo)) return "Debe seleccionar el ámbito de atención.";
+        return null;
+    }
+
+    private string? ValidarPaso(int paso) => paso switch
+    {
+        1 => string.IsNullOrWhiteSpace(form.Causal) ? "Debe seleccionar la causal de la contingencia."
+             : string.IsNullOrWhiteSpace(form.CausalDescripcion) ? "Debe ingresar la descripción de la contingencia."
+             : null,
+        2 => string.IsNullOrWhiteSpace(form.IpsTexto) ? "Debe ingresar la IPS."
+             : detalleIps is null ? "Debe elegir la IPS de la lista de sugerencias (no se admite texto libre)."
+             : null,
+        3 => string.IsNullOrWhiteSpace(form.ProfesionalTexto) ? "Debe ingresar el profesional tratante."
+             : detalleProfesional is null ? "Debe elegir el profesional de la lista de sugerencias (no se admite texto libre)."
+             : null,
+        4 => AfiliadosManual ? ValidarPacienteManual()
+             : !afiliadoEncontrado ? "Debe buscar y confirmar el paciente."
+             : string.IsNullOrWhiteSpace(form.FechaAtencion) || string.IsNullOrWhiteSpace(form.HoraAtencion)
+                ? "Debe ingresar la fecha y hora de atención."
+             : string.IsNullOrWhiteSpace(form.AmbitoAtencionCodigo) ? "Debe seleccionar el ámbito de atención."
+             : null,
+        5 => string.IsNullOrWhiteSpace(form.DiagnosticoTexto) ? "Debe ingresar el diagnóstico (CIE-10)."
+             : detalleDiagnostico is null ? "Debe elegir el diagnóstico de la lista de sugerencias (no se admite texto libre)."
+             : !string.IsNullOrWhiteSpace(form.DiagnosticoRel1Texto) && detalleDiagnosticoRel1 is null
+                ? "El diagnóstico relacionado 1 debe elegirse de la lista de sugerencias (no se admite texto libre)."
+             : !string.IsNullOrWhiteSpace(form.DiagnosticoRel2Texto) && detalleDiagnosticoRel2 is null
+                ? "El diagnóstico relacionado 2 debe elegirse de la lista de sugerencias (no se admite texto libre)."
+             : null,
+        6 => string.IsNullOrWhiteSpace(form.TipoTecnologia) ? "Debe seleccionar el tipo de tecnología." : null,
+        7 => form.TipoTecnologia is "Procedimiento" or "Dispositivo" or "ProductoNutricional" or "ServicioComplementario"
+                && (string.IsNullOrWhiteSpace(form.TecBusquedaTexto) || detalleCodigoTecnologia is null)
+             ? "Debe elegir el código de la lista de sugerencias (no se admite texto libre)."
+             : form.TipoTecnologia == "Medicamento" && (string.IsNullOrWhiteSpace(form.TecPrincipioActivo) || !principioActivoValido)
+             ? "Debe elegir el principio activo (DCI) de la lista de sugerencias (no se admite texto libre)."
+             : form.TipoTecnologia == "Medicamento" && (
+                    string.IsNullOrWhiteSpace(form.TecDosis) || string.IsNullOrWhiteSpace(form.TecFormaFarmaceutica)
+                    || string.IsNullOrWhiteSpace(form.TecViaAdministracion))
+             ? "Debe completar concentración, forma farmacéutica y vía de administración."
+             : null,
+        8 => form.TipoTecnologia == "Medicamento"
+                ? string.IsNullOrWhiteSpace(form.PosCantidadFormulada) ? "Debe ingresar la dosis."
+                : string.IsNullOrWhiteSpace(form.PosCadaFrecuencia) ? "Debe ingresar la frecuencia."
+                : string.IsNullOrWhiteSpace(form.PosCantidadTotal) ? "Debe ingresar la cantidad total."
+                : null
+             : string.IsNullOrWhiteSpace(form.PosCantidadTotal)
+             ? "Debe ingresar la cantidad total."
+             : null,
+        9 => string.IsNullOrWhiteSpace(form.JustificacionTecnica) ? "Debe ingresar la justificación técnica." : null,
+        _ => null,
+    };
+
+    private Task CambiarADibujoAsync() => CambiarModoFirmaAsync("dibujo");
+
+    private Task CambiarAArchivoAsync() => CambiarModoFirmaAsync("archivo");
+
+    private async Task CambiarModoFirmaAsync(string modo)
+    {
+        modoFirma = modo;
+        StateHasChanged();
+        if (modo == "dibujo")
+        {
+            await Task.Delay(50);
+            await JS.InvokeVoidAsync("ImperiumFirmaCanvas.iniciar", "nc-canvas-firma");
+        }
+    }
+
+    private async Task LimpiarDibujoAsync() => await JS.InvokeVoidAsync("ImperiumFirmaCanvas.limpiar", "nc-canvas-firma");
+
+    private async Task GuardarDibujoAsync()
+    {
+        var tieneTrazo = await JS.InvokeAsync<bool>("ImperiumFirmaCanvas.tieneTrazo", "nc-canvas-firma");
+        if (!tieneTrazo)
+        {
+            mensaje = "Dibuje la firma antes de guardarla.";
+            return;
+        }
+
+        firmaDataUrl = await JS.InvokeAsync<string>("ImperiumFirmaCanvas.exportarPng", "nc-canvas-firma");
+        firmaArchivoBytes = null;
+        firmaArchivoExtension = null;
+        mensaje = null;
+    }
+
+    private async Task OnArchivoFirmaSeleccionadoAsync(InputFileChangeEventArgs e)
+    {
+        firmaArchivoExtension = Path.GetExtension(e.File.Name).ToLowerInvariant();
+        await using var stream = e.File.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+        using var memoria = new MemoryStream();
+        await stream.CopyToAsync(memoria);
+        firmaArchivoBytes = memoria.ToArray();
+        firmaDataUrl = firmaArchivoExtension is ".png" or ".jpg" or ".jpeg"
+            ? $"data:image/{(firmaArchivoExtension == ".png" ? "png" : "jpeg")};base64,{Convert.ToBase64String(firmaArchivoBytes)}"
+            : null;
+    }
+
+    private async Task OnSoportesSeleccionadosAsync(InputFileChangeEventArgs e)
+    {
+        soportes.Clear();
+        foreach (var archivo in e.GetMultipleFiles(10))
+        {
+            var extension = Path.GetExtension(archivo.Name).ToLowerInvariant();
+            if (!ExtensionesSoportesPermitidas.Contains(extension)) continue;
+
+            await using var stream = archivo.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            using var memoria = new MemoryStream();
+            await stream.CopyToAsync(memoria);
+            soportes.Add((archivo.Name, memoria.ToArray()));
+        }
+    }
+
+    private async Task ConfirmarAsync()
+    {
+        var tieneFirma = firmaDataUrl is not null || firmaArchivoBytes is not null;
+        if (!tieneFirma)
+        {
+            mensaje = "Debe capturar la firma antes de confirmar.";
+            await JS.InvokeVoidAsync("Tran", mensaje, "");
+            return;
+        }
+
+        enviando = true;
+        try
+        {
+            await DetenerDictadoSiActivoAsync();
+            var (cia, usuApp) = await ObtenerUsuarioAsync();
+
+            var causalNombre = parametricas["CAUSAL"].FirstOrDefault(c => c.Codigo == form.Causal)?.Valor;
+            var (ipsCodigo, ipsNombre) = PartirEnDos(form.IpsTexto);
+            var (profesionalDocumento, resto) = PartirEnDos(form.ProfesionalTexto);
+            var (profesionalNombre, profesionalProfesion) = PartirEnDos(resto ?? "");
+            var (diagnosticoCodigo, diagnosticoDescripcion) = PartirEnDos(form.DiagnosticoTexto);
+            var (diagnosticoRel1Codigo, diagnosticoRel1Descripcion) = PartirEnDos(form.DiagnosticoRel1Texto);
+            var (diagnosticoRel2Codigo, diagnosticoRel2Descripcion) = PartirEnDos(form.DiagnosticoRel2Texto);
+
+            DateTime? fechaNacimiento = DateTime.TryParse(form.PacienteFechaNacimiento, out var fn) ? fn : null;
+            DateTime? fechaAtencion = DateTime.TryParse(form.FechaAtencion, out var fa) ? fa : null;
+            var ambitoAtencionNombre = ambitosAtencion.FirstOrDefault(a => a.Codigo == form.AmbitoAtencionCodigo).Descripcion;
+
+            var solicitud = new SolicitudNuevaContingencia(
+                form.Causal.Trim(), causalNombre, NuloSiVacio(form.CausalDescripcion),
+                ipsCodigo, ipsNombre,
+                profesionalDocumento ?? "", profesionalNombre, profesionalProfesion,
+                form.PacienteTipoDoc, form.PacienteNumDoc.Trim(), form.PacienteNombres.Trim(), form.PacienteApellidos.Trim(),
+                string.IsNullOrEmpty(form.PacienteSexo) ? null : form.PacienteSexo,
+                fechaNacimiento,
+                string.IsNullOrEmpty(form.PacienteMunicipio) ? null : form.PacienteMunicipio,
+                string.IsNullOrEmpty(form.PacienteTelefono) ? null : form.PacienteTelefono,
+                string.IsNullOrEmpty(form.PacienteRegimen) ? null : form.PacienteRegimen,
+                fechaAtencion, NuloSiVacio(form.HoraAtencion),
+                NuloSiVacio(form.AmbitoAtencionCodigo), NuloSiVacio(ambitoAtencionNombre),
+                diagnosticoCodigo ?? "", diagnosticoDescripcion,
+                diagnosticoRel1Codigo, diagnosticoRel1Descripcion, diagnosticoRel2Codigo, diagnosticoRel2Descripcion,
+                TodasLasTecnologias());
+
+            var resultado = await ContingenciasService.RegistrarAsync(cia, usuApp, solicitud);
+            if (!resultado.Exito)
+            {
+                mensaje = resultado.Mensaje;
+                await JS.InvokeVoidAsync("Tran", resultado.Mensaje, "");
+                return;
+            }
+
+            var radicado = resultado.Radicado!;
+
+            string? firmaRutaRelativa = null;
+            if (firmaArchivoBytes is not null)
+            {
+                firmaRutaRelativa = ArchivoService.RutaRelativaFirma(cia, radicado);
+                using var stream = new MemoryStream(firmaArchivoBytes);
+                await ArchivoService.GuardarAsync(firmaRutaRelativa, stream);
+            }
+            else if (firmaDataUrl is not null)
+            {
+                firmaRutaRelativa = ArchivoService.RutaRelativaFirma(cia, radicado);
+                await ArchivoService.GuardarBase64PngAsync(firmaRutaRelativa, firmaDataUrl);
+            }
+
+            var rutasSoportes = new List<string>();
+            for (var i = 0; i < soportes.Count; i++)
+            {
+                var extension = Path.GetExtension(soportes[i].NombreOriginal).ToLowerInvariant();
+                var rutaRelativa = ArchivoService.RutaRelativaSoporte(cia, radicado, i + 1, extension);
+                using var stream = new MemoryStream(soportes[i].Contenido);
+                await ArchivoService.GuardarAsync(rutaRelativa, stream);
+                rutasSoportes.Add(rutaRelativa);
+            }
+
+            var soportesJson = rutasSoportes.Count > 0 ? System.Text.Json.JsonSerializer.Serialize(rutasSoportes) : null;
+            await ContingenciasService.ActualizarArchivosAsync(cia, radicado, firmaRutaRelativa, soportesJson);
+
+            await JS.InvokeVoidAsync("TranFormulario", "Contingencia registrada", $"Radicado: {radicado}",
+                $"/api/contingencias/formulario?radicado={Uri.EscapeDataString(radicado)}", "/formatos/contingencias/consultar");
+        }
+        finally
+        {
+            enviando = false;
+        }
+    }
+
+    // Datalist arma "Parte1|Parte2" (mismo formato que "Codigo|Nombre" ya usado por el
+    // autocompletado de prestador) — si el usuario escribe texto libre sin elegir una
+    // sugerencia, se guarda todo en Parte1 y Parte2 queda null (misma tolerancia que
+    // CargarFormato.razor con el campo de prestador).
+    private static (string? Parte1, string? Parte2) PartirEnDos(string texto)
+    {
+        if (string.IsNullOrWhiteSpace(texto)) return (null, null);
+        var indice = texto.IndexOf('|');
+        return indice < 0 ? (texto.Trim(), null) : (texto[..indice].Trim(), texto[(indice + 1)..].Trim());
+    }
+
+    // Para la revisión final (paso 11): convierte "Codigo|Descripcion" en "Codigo — Descripcion"
+    // en vez de mostrarle al usuario el separador interno crudo del datalist.
+    private static string TextoLegible(string texto)
+    {
+        var (parte1, parte2) = PartirEnDos(texto);
+        if (parte1 is null) return "";
+        return parte2 is null ? parte1 : $"{parte1} — {parte2}";
+    }
+
+    private string ProfesionalLegible()
+    {
+        var (documento, resto) = PartirEnDos(form.ProfesionalTexto);
+        if (documento is null) return "";
+        var (nombre, profesion) = PartirEnDos(resto ?? "");
+        if (nombre is null) return documento;
+        return profesion is null ? $"{documento} — {nombre}" : $"{documento} — {nombre} ({profesion})";
+    }
+
+    private static string? NuloSiVacio(string? valor) => string.IsNullOrWhiteSpace(valor) ? null : valor;
+
+    // ================= Dictado por voz =================
+
+    private async Task AlternarDictadoAsync()
+    {
+        if (dictando)
+        {
+            await JS.InvokeVoidAsync("ImperiumDictado.detener");
+            dictando = false;
+            return;
+        }
+
+        errorDictado = null;
+        dictadoRef ??= DotNetObjectReference.Create(this);
+        dictando = true;
+        await JS.InvokeVoidAsync("ImperiumDictado.iniciar", dictadoRef, "es-CO");
+    }
+
+    private async Task DetenerDictadoSiActivoAsync()
+    {
+        if (!dictando) return;
+        await JS.InvokeVoidAsync("ImperiumDictado.detener");
+        dictando = false;
+    }
+
+    private void LimpiarEstadoDictado()
+    {
+        transcripcionDictado = "";
+        errorDictado = null;
+        mensajeDictado = null;
+    }
+
+    private void LimpiarDictado()
+    {
+        transcripcionDictado = "";
+        mensajeDictado = null;
+    }
+
+    [JSInvokable]
+    public void OnDictadoResultado(string transcripcion, bool esFinal)
+    {
+        if (!esFinal) return;
+        transcripcionDictado = string.IsNullOrWhiteSpace(transcripcionDictado)
+            ? transcripcion.Trim()
+            : $"{transcripcionDictado} {transcripcion.Trim()}";
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnDictadoError(string codigo)
+    {
+        dictando = false;
+        errorDictado = codigo switch
+        {
+            "not-allowed" or "service-not-allowed" => "Permiso de micrófono denegado. Habilítalo en el navegador.",
+            "no-speech" => "No se detectó voz. Intenta de nuevo.",
+            "audio-capture" => "No se encontró un micrófono disponible.",
+            "no-soportado" => "Dictado por voz no disponible en este navegador.",
+            _ => $"No se pudo usar el dictado por voz ({codigo}).",
+        };
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnDictadoFin()
+    {
+        dictando = false;
+        StateHasChanged();
+    }
+
+    private string EjemploDictadoPasoActual() => pasoActual switch
+    {
+        1 => "causal, urgencia médica. descripción, no fue posible acceder a la plataforma MIPRES durante la atención del paciente",
+        2 => "ips, 1234",
+        3 => "profesional, Juan Pérez",
+        4 => "tipo de documento, cédula de ciudadanía. número de documento, 123456789",
+        5 => "diagnóstico, A00",
+        6 => "tipo de tecnología, medicamento",
+        7 => form.TipoTecnologia is "Procedimiento" or "Dispositivo" or "ProductoNutricional" or "ServicioComplementario"
+                ? "código, ABC123"
+                : "principio activo, acetaminofén. concentración, 500 miligramos",
+        8 => form.TipoTecnologia == "Medicamento"
+                ? "dosis, 850. cada, 12. cantidad total, 60. duración, 30"
+                : "cantidad total, 60. duración, 30",
+        9 => "justificación técnica, el paciente requiere continuidad del tratamiento",
+        _ => "",
+    };
+
+    // Sinónimo (en español, sin tildes) → acción de asignación. La acción devuelve false si
+    // el valor dictado no se pudo interpretar (ej. no coincide con ninguna opción de un
+    // desplegable cerrado) — nunca lanza excepción ni bloquea el flujo, el campo
+    // simplemente queda para llenar a mano.
+    private sealed record CampoDictado(string Etiqueta, string[] Sinonimos, Func<string, bool> Asignar);
+
+    private List<CampoDictado> CamposDictadoPasoActual() => pasoActual switch
+    {
+        1 =>
+        [
+            new("Causal", ["causal"], AsignarCausalPorVoz),
+            new("Descripción", ["descripcion"], v => { form.CausalDescripcion = LimitarTexto(v, 500); return true; }),
+        ],
+        2 =>
+        [
+            new("IPS", ["ips", "prestador", "codigo de habilitacion"], v => { form.IpsTexto = v; return true; }),
+        ],
+        3 =>
+        [
+            new("Profesional", ["profesional", "medico tratante"], v => { form.ProfesionalTexto = v; return true; }),
+        ],
+        4 =>
+        [
+            // Con web service de afiliados el resto de los datos del paciente (nombres, sexo,
+            // municipio, teléfono, régimen) NO se dictan ni se digitan: vienen del WS tras pulsar
+            // "Buscar", y el dictado solo llena el documento para buscar. En modo manual (CIA sin
+            // WS) sí se dictan los campos de texto.
+            new("Tipo de documento", ["tipo de documento"], AsignarTipoDocumentoPorVoz),
+            new("Número de documento", ["numero de documento", "documento"], AsignarSoloDigitos(v => form.PacienteNumDoc = v)),
+            // Modo manual: además del documento se dictan los datos de texto del paciente.
+            .. (AfiliadosManual
+                ? new CampoDictado[]
+                {
+                    new("Nombres", ["nombres"], v => { form.PacienteNombres = LimitarTexto(v, 100); return true; }),
+                    new("Apellidos", ["apellidos"], v => { form.PacienteApellidos = LimitarTexto(v, 100); return true; }),
+                    new("Municipio", ["municipio"], v => { form.PacienteMunicipio = LimitarTexto(v, 100); return true; }),
+                    new("Teléfono", ["telefono", "celular"], AsignarSoloDigitos(v => form.PacienteTelefono = LimitarTexto(v, 20))),
+                }
+                : []),
+        ],
+        5 =>
+        [
+            new("Diagnóstico", ["diagnostico", "cie"], v => { form.DiagnosticoTexto = v; return true; }),
+            new("Diagnóstico relacionado 1", ["diagnostico relacionado 1", "diagnostico relacionado uno"], v => { form.DiagnosticoRel1Texto = v; return true; }),
+            new("Diagnóstico relacionado 2", ["diagnostico relacionado 2", "diagnostico relacionado dos"], v => { form.DiagnosticoRel2Texto = v; return true; }),
+        ],
+        6 =>
+        [
+            new("Tipo de tecnología", ["tipo de tecnologia", "tecnologia"],
+                AsignarOpcion(["Medicamento", "Procedimiento", "Dispositivo", "ProductoNutricional", "ServicioComplementario"], v => form.TipoTecnologia = v)),
+        ],
+        7 => CamposDictadoPaso7(),
+        8 => CamposDictadoPaso8(),
+        9 =>
+        [
+            new("Justificación técnica", ["justificacion tecnica", "justificacion"], v => { form.JustificacionTecnica = v; return true; }),
+        ],
+        _ => [],
+    };
+
+    private List<CampoDictado> CamposDictadoPaso7() => form.TipoTecnologia switch
+    {
+        "Medicamento" =>
+        [
+            new("Principio activo", ["principio activo", "dci"], v => { form.TecPrincipioActivo = v; return true; }),
+            new("Concentración", ["concentracion", "dosis"], v => { form.TecDosis = v; return true; }),
+            new("Forma farmacéutica", ["forma farmaceutica"], AsignarOpcion(formasFarmaceuticas.Select(f => f.Descripcion).ToList(), v => form.TecFormaFarmaceutica = v)),
+            new("Vía de administración", ["via de administracion", "via"], AsignarOpcion(viasAdministracion.Select(v => v.Descripcion).ToList(), v => form.TecViaAdministracion = v)),
+        ],
+        "Procedimiento" or "Dispositivo" or "ProductoNutricional" or "ServicioComplementario" =>
+        [
+            new("Código o descripción", ["codigo", "descripcion", "nombre"], v => { form.TecBusquedaTexto = v; return true; }),
+        ],
+        _ => [],
+    };
+
+    private List<CampoDictado> CamposDictadoPaso8() => form.TipoTecnologia switch
+    {
+        "Medicamento" =>
+        [
+            new("Dosis", ["dosis", "cantidad formulada"], AsignarSoloDigitos(v => form.PosCantidadFormulada = v)),
+            new("Unidad de dosis", ["unidad de dosis"], AsignarOpcion(unidadesDosis.Select(u => u.Descripcion).ToList(), v => form.PosCantidadFormuladaUnidad = v)),
+            new("Frecuencia", ["frecuencia", "cada"], AsignarSoloDigitos(v => form.PosCadaFrecuencia = v)),
+            new("Unidad de frecuencia", ["unidad de frecuencia"], AsignarOpcion(unidadesFrecuencia.Select(u => u.Descripcion).ToList(), v => form.PosFrecuencia = v)),
+            new("Cantidad total", ["cantidad total"], AsignarSoloDigitos(v => form.PosCantidadTotal = v)),
+            new("Duración", ["duracion"], AsignarSoloDigitos(v => form.PosDuracionTratamiento = v)),
+            new("Unidad de tiempo", ["unidad de tiempo", "unidad de duracion"], AsignarOpcion(unidadesFrecuencia.Select(u => u.Descripcion).ToList(), v => form.PosDuracionUnidad = v)),
+            new("Indicación especial", ["indicacion especial"], AsignarOpcion(CatalogosPosologia.IndicacionEspecial, v => form.PosIndicacionEspecial = v)),
+            new("Indicaciones adicionales", ["indicaciones adicionales", "indicaciones"], v => { form.PosIndicacionesAdicionales = v; return true; }),
+        ],
+        _ =>
+        [
+            new("Cantidad total", ["cantidad total"], AsignarSoloDigitos(v => form.PosCantidadTotal = v)),
+            new("Duración", ["duracion"], AsignarSoloDigitos(v => form.PosDuracionTratamiento = v)),
+            new("Unidad de tiempo", ["unidad de tiempo", "unidad de duracion"], AsignarOpcion(CatalogosPosologia.DuracionUnidad, v => form.PosDuracionUnidad = v)),
+            new("Indicación especial", ["indicacion especial"], AsignarOpcion(CatalogosPosologia.IndicacionEspecial, v => form.PosIndicacionEspecial = v)),
+            new("Indicaciones adicionales", ["indicaciones adicionales", "indicaciones"], v => { form.PosIndicacionesAdicionales = v; return true; }),
+        ],
+    };
+
+    private bool AsignarCausalPorVoz(string valorNormalizado)
+    {
+        var opcion = parametricas["CAUSAL"].FirstOrDefault(o =>
+            Normalizar(o.Valor).Contains(valorNormalizado) || valorNormalizado.Contains(Normalizar(o.Valor)));
+        if (opcion is null) return false;
+        form.Causal = opcion.Codigo;
+        return true;
+    }
+
+    private static readonly (string[] Frases, string Codigo)[] MapaTipoDocumento =
+    [
+        (["cedula de ciudadania", "cedula"], "CC"),
+        (["cedula de extranjeria"], "CE"),
+        (["tarjeta de identidad"], "TI"),
+        (["registro civil"], "RC"),
+        (["pasaporte"], "PA"),
+        (["certificado de nacido vivo"], "NV"),
+        (["menor sin identificacion"], "MS"),
+        (["adulto sin identificacion"], "AS"),
+    ];
+
+    private bool AsignarTipoDocumentoPorVoz(string valor)
+    {
+        foreach (var (frases, codigo) in MapaTipoDocumento)
+        {
+            if (frases.Any(f => valor.Contains(f)))
+            {
+                form.PacienteTipoDoc = codigo;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Func<string, bool> AsignarSoloDigitos(Action<string> asignar) => valor =>
+    {
+        var digitos = new string(valor.Where(char.IsDigit).ToArray());
+        if (digitos.Length == 0) return false;
+        asignar(digitos);
+        return true;
+    };
+
+    private static Func<string, bool> AsignarOpcion(IReadOnlyList<string> opciones, Action<string> asignar) => valor =>
+    {
+        var opcion = opciones.FirstOrDefault(o => Normalizar(o).Contains(valor) || valor.Contains(Normalizar(o)));
+        if (opcion is null) return false;
+        asignar(opcion);
+        return true;
+    };
+
+    private static string LimitarTexto(string valor, int longitudMaxima) =>
+        valor.Length > longitudMaxima ? valor[..longitudMaxima] : valor;
+
+    // Quita tildes/diacríticos y pasa a minúsculas, para comparar sin importar acentuación
+    // (el reconocimiento de voz no siempre transcribe tildes de forma consistente).
+    private static string Normalizar(string texto)
+    {
+        var descompuesto = texto.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder();
+        foreach (var caracter in descompuesto)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(caracter) != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(caracter);
+            }
+        }
+        return builder.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant().Trim();
+    }
+
+    private static string LimpiarValor(string valor)
+    {
+        var limpio = valor.Trim().Trim(':', ',', '-', '.').Trim();
+        string[] conectores = ["es igual a ", "igual a ", "es "];
+        foreach (var conector in conectores)
+        {
+            if (limpio.StartsWith(conector, StringComparison.Ordinal))
+            {
+                limpio = limpio[conector.Length..].Trim();
+                break;
+            }
+        }
+        return limpio;
+    }
+
+    // Parser "mejor esfuerzo": ubica en la transcripción, para cada campo del paso actual,
+    // el sinónimo más largo que aparezca (evita que "documento" se coma la mención de
+    // "número de documento"), y toma como valor el texto entre esa mención y la siguiente.
+    // Nunca lanza excepción; lo que no se reconoce se deja para llenar a mano.
+    private void CargarCampos()
+    {
+        var campos = CamposDictadoPasoActual();
+        var aplicados = new List<string>();
+        var noReconocidos = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(transcripcionDictado) || campos.Count == 0)
+        {
+            mensajeDictado = "No hay texto dictado para aplicar.";
+            return;
+        }
+
+        var normalizado = Normalizar(transcripcionDictado);
+        var menciones = new List<(int Inicio, int Longitud, CampoDictado Campo)>();
+
+        foreach (var campo in campos)
+        {
+            foreach (var sinonimo in campo.Sinonimos.OrderByDescending(s => s.Length))
+            {
+                var indice = normalizado.IndexOf(sinonimo, StringComparison.Ordinal);
+                if (indice >= 0)
+                {
+                    menciones.Add((indice, sinonimo.Length, campo));
+                    break;
+                }
+            }
+        }
+
+        if (menciones.Count == 0)
+        {
+            mensajeDictado = "No se reconoció ningún campo en el texto dictado.";
+            return;
+        }
+
+        menciones.Sort((a, b) => a.Inicio.CompareTo(b.Inicio));
+
+        for (var i = 0; i < menciones.Count; i++)
+        {
+            var (inicio, longitud, campo) = menciones[i];
+            var fin = i + 1 < menciones.Count ? menciones[i + 1].Inicio : normalizado.Length;
+            var inicioValor = inicio + longitud;
+
+            var crudo = inicioValor < fin && fin <= normalizado.Length ? normalizado[inicioValor..fin] : "";
+            var valor = LimpiarValor(crudo);
+
+            if (valor.Length == 0 || !campo.Asignar(valor))
+            {
+                noReconocidos.Add(campo.Etiqueta);
+                continue;
+            }
+
+            aplicados.Add(campo.Etiqueta);
+        }
+
+        var mencionados = menciones.Select(m => m.Campo.Etiqueta).ToHashSet();
+        noReconocidos.AddRange(campos.Where(c => !mencionados.Contains(c.Etiqueta)).Select(c => c.Etiqueta));
+
+        mensajeDictado =
+            (aplicados.Count > 0 ? $"Se completaron: {string.Join(", ", aplicados)}. " : "") +
+            (noReconocidos.Count > 0 ? $"No se reconocieron: {string.Join(", ", noReconocidos)}." : "");
+
+        if (mensajeDictado.Length == 0)
+        {
+            mensajeDictado = "No se aplicó ningún campo.";
+        }
+    }
+
+    private class FormularioNuevaContingencia
+    {
+        public string Causal { get; set; } = "";
+        public string CausalDescripcion { get; set; } = "";
+        public string IpsTexto { get; set; } = "";
+        public string ProfesionalTexto { get; set; } = "";
+        public string PacienteTipoDoc { get; set; } = "CC";
+        public string PacienteNumDoc { get; set; } = "";
+        public string PacienteNombres { get; set; } = "";
+        public string PacienteApellidos { get; set; } = "";
+        public string PacienteSexo { get; set; } = "";
+        public string PacienteFechaNacimiento { get; set; } = "";
+        public string PacienteMunicipio { get; set; } = "";
+        public string PacienteTelefono { get; set; } = "";
+        public string PacienteRegimen { get; set; } = "";
+        public string FechaAtencion { get; set; } = "";
+        public string HoraAtencion { get; set; } = "";
+        public string AmbitoAtencionCodigo { get; set; } = "";
+        public string DiagnosticoTexto { get; set; } = "";
+        public string DiagnosticoRel1Texto { get; set; } = "";
+        public string DiagnosticoRel2Texto { get; set; } = "";
+        public string TipoTecnologia { get; set; } = "";
+        public string TecNombre { get; set; } = "";
+        public string TecCodigo { get; set; } = "";
+        public string TecBusquedaTexto { get; set; } = "";
+        public string TecPrincipioActivo { get; set; } = "";
+        public string TecFormaFarmaceutica { get; set; } = "";
+        public string TecViaAdministracion { get; set; } = "";
+        public string TecDosis { get; set; } = "";
+        public string PosTipoPrestacion { get; set; } = "";
+        public string PosCantidadFormulada { get; set; } = "";
+        public string PosCantidadFormuladaUnidad { get; set; } = "";
+        public string PosCadaFrecuencia { get; set; } = "";
+        public string PosFrecuencia { get; set; } = "";
+        public string PosDuracionTratamiento { get; set; } = "";
+        public string PosDuracionUnidad { get; set; } = "";
+        public string PosIndicacionEspecial { get; set; } = "";
+        public string PosCantidadTotal { get; set; } = "";
+        public string PosIndicadorRecurrencia { get; set; } = "";
+        public string PosIndicacionesAdicionales { get; set; } = "";
+        public string JustificacionTecnica { get; set; } = "";
+    }
+}

@@ -1,0 +1,105 @@
+@page "/sugerencias"
+@layout AppLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Contingencia.Application.Auth
+@using Contingencia.Application.Sugerencias
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ISugerenciasService Servicio
+
+@* Equivalente a Sugerencias.aspx (master SiteMIPRESN — no confundir con SugerenciasREC.aspx,
+   el que usa Recobros bajo Site.Master: mismo formulario, pero destinatarios y asunto reales
+   distintos, confirmados leyendo cada fuente por separado). Formulario simple sin lógica de
+   negocio propia: solo arma y envía un correo, mismo patrón ya usado en Recobros para esta
+   misma página (alert inline en la propia página, sin diálogos SweetAlert). *@
+
+<PageTitle>Buzón PQR</PageTitle>
+
+<div class="sug-header">
+    <h1>Buzón de sugerencias, quejas, reclamos y felicitaciones</h1>
+    <p>Radique su solicitud, queja o reclamo.</p>
+</div>
+
+<section class="sug-card">
+    @if (mensaje is not null)
+    {
+        <div class="alert @(mensajeEsError ? "alert-error" : "alert-ok")">@mensaje</div>
+    }
+
+    <label class="sug-label">Indique el tipo de notificación:</label>
+    <select class="sug-input" @bind="tipo">
+        <option>Sugerencia</option>
+        <option>Queja</option>
+        <option>Reclamo</option>
+        <option>Felicitación</option>
+    </select>
+
+    <label class="sug-label">Email de respuesta al PQR:</label>
+    <input type="email" class="sug-input" placeholder="Indique el email" @bind="email" @bind:event="oninput" />
+
+    <label class="sug-label">Mensaje:</label>
+    <textarea class="sug-input sug-textarea" placeholder="Redacte la petición, queja, reclamo o felicitación" @bind="descripcion" @bind:event="oninput"></textarea>
+
+    <div class="sug-acciones">
+        <button type="button" class="sug-btn" disabled="@enviando" @onclick="NotificarAsync">
+            @(enviando ? "Enviando..." : "Notificar")
+        </button>
+    </div>
+</section>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? EstadoAutenticacion { get; set; }
+
+    private string usuario = "";
+    private string tipo = "Sugerencia";
+    private string email = "";
+    private string descripcion = "";
+    private bool enviando;
+
+    private string? mensaje;
+    private bool mensajeEsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var estado = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
+        usuario = estado?.User.UsuApp() ?? "";
+    }
+
+    private async Task NotificarAsync()
+    {
+        // Réplica de btnconsultar_ServerClick: la única validación real del legado.
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            Mostrar("Ingrese el email", esError: true);
+            return;
+        }
+
+        enviando = true;
+        try
+        {
+            var exito = await Servicio.EnviarAsync(tipo, email, descripcion, usuario);
+            if (exito)
+            {
+                Mostrar("Mensaje enviado", esError: false);
+                email = "";
+                descripcion = "";
+            }
+            else
+            {
+                Mostrar("No es posible enviar el mensaje", esError: true);
+            }
+        }
+        finally
+        {
+            enviando = false;
+        }
+    }
+
+    private void Mostrar(string texto, bool esError)
+    {
+        mensaje = texto;
+        mensajeEsError = esError;
+    }
+}

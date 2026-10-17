@@ -1,0 +1,328 @@
+@page "/formatos/contingencias/consultar"
+@layout AppLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using System.Data
+@using Contingencia.Application.Auth
+@using Contingencia.Application.Formatos
+@using Contingencia.Application.Contingencias
+@using Contingencia.Application.Parametricas
+@using Contingencia.Web.Services
+@inject IContingenciasService ContingenciasService
+@inject IParametricasService ParametricasService
+@inject IFormatosService FormatosService
+@inject IExcelExportService Excel
+@inject IJSRuntime JS
+
+@* Página de solo lectura para el wizard "Nueva Contingencia" (DQS_MIP_CONTINGENCIAS) — no
+   retro-ajusta ConsultarFormato.razor porque esa está atada a DQS_MIP_FORMATOS/
+   FormatoConsultado, un modelo distinto. Sin modal de "Gestionar": esta tabla no tiene un
+   flujo de estados todavía (ver BASE_DE_DATOS.md). *@
+
+<PageTitle>Consultar nueva contingencia</PageTitle>
+
+<div class="fmt-header">
+    <h1><i class="fa-solid fa-magnifying-glass"></i> Consultar nueva contingencia</h1>
+    <p>Consulte las contingencias MIPRES radicadas con el wizard "Nueva contingencia".</p>
+</div>
+
+<div class="fmt-card">
+    <div class="fmt-row">
+        <div class="fmt-campo">
+            <label class="fmt-label">No Radicado</label>
+            <input type="text" class="fmt-input" @bind="radicado" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Causal</label>
+            <select class="fmt-select" @bind="causal">
+                <option value="">Todo</option>
+                @foreach (var c in parametricas["CAUSAL"])
+                {
+                    <option value="@c.Codigo">@c.Valor</option>
+                }
+            </select>
+        </div>
+        <div class="fmt-campo fmt-campo-ancho">
+            <label class="fmt-label">Código de Habilitación - IPS</label>
+            <input class="fmt-input" list="dl-ips" value="@ipsTexto" @oninput="OnIpsInputAsync" placeholder="Ingresar" />
+            <datalist id="dl-ips">@foreach (var o in opcionesIps) { <option value="@o.Codigo">@o.Nombre</option> }</datalist>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Documento profesional</label>
+            <input type="text" class="fmt-input" @bind="profesionalDocumento" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Documento paciente</label>
+            <input type="text" class="fmt-input" @bind="pacienteNumDoc" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Tipo de tecnología</label>
+            <select class="fmt-select" @bind="tipoTecnologia">
+                <option value="">Todo</option>
+                <option value="Medicamento">Medicamento</option>
+                <option value="Procedimiento">Procedimiento</option>
+                <option value="Dispositivo">Dispositivo médico</option>
+                <option value="ProductoNutricional">Producto nutricional</option>
+                <option value="ServicioComplementario">Servicio complementario</option>
+            </select>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Fecha Inicio</label>
+            <input type="date" class="fmt-input" value="@fechaInicio" @onchange="e => fechaInicio = e.Value?.ToString() ?? string.Empty" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Fecha Fin</label>
+            <input type="date" class="fmt-input" value="@fechaFin" @onchange="e => fechaFin = e.Value?.ToString() ?? string.Empty" />
+        </div>
+    </div>
+
+    <div class="fmt-acciones">
+        <button type="button" class="fmt-btn" disabled="@consultando" @onclick="ConsultarAsync">
+            <i class="fa-solid fa-magnifying-glass"></i> @(consultando ? "Consultando..." : "Consultar")
+        </button>
+        <button type="button" class="fmt-btn-secundario" disabled="@exportando" @onclick="ExportarAsync">
+            <i class="fa-solid fa-file-excel"></i> @(exportando ? "Exportando..." : "Exportar a Excel")
+        </button>
+    </div>
+</div>
+
+@if (resultados is not null)
+{
+    <div class="fmt-card" style="margin-top:1.25rem">
+        @if (resultados.Count == 0)
+        {
+            <p class="fmt-vacio">No se encontraron contingencias con los criterios ingresados.</p>
+        }
+        else
+        {
+            <div class="fmt-tabla-scroll">
+                <table class="fmt-tabla">
+                    <thead>
+                        <tr>
+                            <th>Ver</th>
+                            <th>Radicado</th>
+                            <th>Fecha</th>
+                            <th>Causal</th>
+                            <th>IPS</th>
+                            <th>Profesional</th>
+                            <th>Paciente</th>
+                            <th>Diagnóstico</th>
+                            <th>Tipo tecnología</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in resultados)
+                        {
+                            <tr>
+                                <td>
+                                    <button type="button" class="fmt-icono-btn" title="Ver detalle" @onclick="() => AbrirDetalle(c)">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                    <a class="fmt-icono-btn" title="Ver formulario MIPRES NoPBS (PDF)" target="_blank"
+                                       href="/api/contingencias/formulario?radicado=@Uri.EscapeDataString(c.Radicado)">
+                                        <i class="fa-solid fa-file-pdf"></i>
+                                    </a>
+                                </td>
+                                <td>@c.Radicado</td>
+                                <td>@c.FechaCreacion.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td>@(c.CausalNombre ?? c.Causal)</td>
+                                <td>@c.IpsNombre</td>
+                                <td>@c.ProfesionalNombre</td>
+                                <td>@c.PacienteNombres @c.PacienteApellidos</td>
+                                <td>@c.DiagnosticoCodigo</td>
+                                <td>@c.TiposTecnologia</td>
+                                <td><span class="fmt-estado">@c.Estado</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@if (detalle is not null)
+{
+    <div class="fmt-modal-fondo" @onclick="CerrarDetalle">
+        <div class="fmt-modal" @onclick:stopPropagation="true" style="max-width:640px">
+            <div class="fmt-modal-encabezado">
+                <h3>Contingencia @detalle.Radicado</h3>
+                <a class="fmt-btn-secundario" target="_blank" title="Ver formulario MIPRES NoPBS (PDF)"
+                   href="/api/contingencias/formulario?radicado=@Uri.EscapeDataString(detalle.Radicado)">
+                    <i class="fa-solid fa-file-pdf"></i> Formulario PDF
+                </a>
+                <button type="button" class="fmt-modal-cerrar" @onclick="CerrarDetalle">&times;</button>
+            </div>
+            <div class="fmt-modal-cuerpo">
+                <p><strong>Causal:</strong> @(detalle.CausalNombre ?? detalle.Causal)</p>
+                <p><strong>Descripción de la contingencia:</strong> @detalle.CausalDescripcion</p>
+                <p><strong>IPS:</strong> @detalle.IpsCodigo — @detalle.IpsNombre</p>
+                <p><strong>Profesional:</strong> @detalle.ProfesionalDocumento — @detalle.ProfesionalNombre (@detalle.ProfesionalProfesion)</p>
+                <p><strong>Paciente:</strong> @detalle.PacienteTipoDoc @detalle.PacienteNumDoc — @detalle.PacienteNombres @detalle.PacienteApellidos</p>
+                <p><strong>Atención:</strong> @(detalle.PacienteFechaAtencion?.ToString("yyyy-MM-dd")) @detalle.PacienteHoraAtencion — @detalle.PacienteAmbitoAtencionNombre</p>
+                <p><strong>Diagnóstico:</strong> @detalle.DiagnosticoCodigo — @detalle.DiagnosticoDescripcion</p>
+                @if (!string.IsNullOrWhiteSpace(detalle.DiagnosticoRel1Codigo))
+                {
+                    <p><strong>Diagnóstico relacionado 1:</strong> @detalle.DiagnosticoRel1Codigo — @detalle.DiagnosticoRel1Descripcion</p>
+                }
+                @if (!string.IsNullOrWhiteSpace(detalle.DiagnosticoRel2Codigo))
+                {
+                    <p><strong>Diagnóstico relacionado 2:</strong> @detalle.DiagnosticoRel2Codigo — @detalle.DiagnosticoRel2Descripcion</p>
+                }
+                @for (var i = 0; i < detalle.Tecnologias.Count; i++)
+                {
+                    var t = detalle.Tecnologias[i];
+                    <div class="cnc-tecnologia">
+                        <p><strong>Tecnología @(i + 1) (@t.TipoTecnologia):</strong> @ResumenTecnologia.Detalle(t)</p>
+                        <p><strong>Posología:</strong> @ResumenTecnologia.Posologia(t)</p>
+                        @if (!string.IsNullOrWhiteSpace(t.PosIndicacionesAdicionales))
+                        {
+                            <p><strong>Indicaciones adicionales:</strong> @t.PosIndicacionesAdicionales</p>
+                        }
+                        <p><strong>Justificación técnica:</strong> @t.JustificacionTecnica</p>
+                    </div>
+                }
+
+                @if (rutasSoportesDetalle.Count > 0)
+                {
+                    <p><strong>Soportes:</strong></p>
+                    <ul>
+                        @foreach (var ruta in rutasSoportesDetalle)
+                        {
+                            <li><a href="@UrlArchivo(detalle.Radicado, ruta)" target="_blank">@ruta.Split('/')[^1]</a></li>
+                        }
+                    </ul>
+                }
+
+                @if (!string.IsNullOrEmpty(detalle.FirmaRuta))
+                {
+                    <p><strong>Firma:</strong></p>
+                    <img src="@UrlArchivo(detalle.Radicado, detalle.FirmaRuta)" alt="Firma" class="cnc-firma-preview" />
+                }
+
+                @if (detalle.FirmaPendienteFea)
+                {
+                    <p class="fmt-ayuda" style="color:#b7791f">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        Firma capturada localmente — integración con proveedor de firma electrónica avanzada (FEA) pendiente.
+                    </p>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string radicado = "";
+    private string causal = "";
+    private string ipsTexto = "";
+    private string profesionalDocumento = "";
+    private string pacienteNumDoc = "";
+    private string tipoTecnologia = "";
+    private string fechaInicio = "";
+    private string fechaFin = "";
+    private bool consultando;
+    private bool exportando;
+
+    private IReadOnlyList<PrestadorHabilitacion> opcionesIps = [];
+    private ILookup<string, ParametricaValor> parametricas = Enumerable.Empty<ParametricaValor>().ToLookup(_ => "");
+    private List<ContingenciaConsultada>? resultados;
+    private ContingenciaConsultada? detalle;
+    private List<string> rutasSoportesDetalle = [];
+
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? EstadoAutenticacion { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        parametricas = await ParametricasService.CargarAsync();
+    }
+
+    private async Task<string> ObtenerCiaAsync()
+    {
+        var estado = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
+        return estado?.User.Cia() ?? "";
+    }
+
+    private async Task OnIpsInputAsync(ChangeEventArgs e)
+    {
+        ipsTexto = e.Value?.ToString() ?? "";
+        opcionesIps = await FormatosService.BuscarPrestadoresAsync(ipsTexto);
+    }
+
+    private async Task ConsultarAsync()
+    {
+        consultando = true;
+        try
+        {
+            var cia = await ObtenerCiaAsync();
+            var filtro = new FiltroConsultaContingencias(
+                Radicado: NuloSiVacio(radicado), Causal: NuloSiVacio(causal), IpsCodigo: NuloSiVacio(ipsTexto),
+                ProfesionalDocumento: NuloSiVacio(profesionalDocumento), PacienteNumDoc: NuloSiVacio(pacienteNumDoc),
+                TipoTecnologia: NuloSiVacio(tipoTecnologia), FechaInicio: NuloSiVacio(fechaInicio), FechaFin: NuloSiVacio(fechaFin));
+
+            var resultado = await ContingenciasService.ConsultarAsync(cia, null, filtro);
+            resultados = resultado.Contingencias.ToList();
+        }
+        finally
+        {
+            consultando = false;
+        }
+    }
+
+    private void AbrirDetalle(ContingenciaConsultada c)
+    {
+        detalle = c;
+        rutasSoportesDetalle = string.IsNullOrEmpty(c.SoportesRutasJson)
+            ? []
+            : System.Text.Json.JsonSerializer.Deserialize<List<string>>(c.SoportesRutasJson) ?? [];
+    }
+
+    private void CerrarDetalle()
+    {
+        detalle = null;
+        rutasSoportesDetalle = [];
+    }
+
+    private static string UrlArchivo(string radicado, string rutaRelativa) =>
+        $"/api/contingencias/archivo?radicado={Uri.EscapeDataString(radicado)}&ruta={Uri.EscapeDataString(rutaRelativa)}";
+
+    private async Task ExportarAsync()
+    {
+        exportando = true;
+        try
+        {
+            await ConsultarAsync();
+            if (resultados is null) return;
+
+            var tabla = new DataTable();
+            tabla.Columns.Add("Radicado");
+            tabla.Columns.Add("Fecha");
+            tabla.Columns.Add("Causal");
+            tabla.Columns.Add("IPS");
+            tabla.Columns.Add("Profesional");
+            tabla.Columns.Add("Paciente");
+            tabla.Columns.Add("Diagnostico");
+            tabla.Columns.Add("TipoTecnologia");
+            tabla.Columns.Add("Estado");
+            foreach (var c in resultados)
+            {
+                tabla.Rows.Add(c.Radicado, c.FechaCreacion.ToString("yyyy-MM-dd HH:mm"), c.CausalNombre ?? c.Causal, c.IpsNombre,
+                    c.ProfesionalNombre, $"{c.PacienteNombres} {c.PacienteApellidos}", c.DiagnosticoCodigo, c.TiposTecnologia, c.Estado);
+            }
+
+            var bytes = Excel.AXlsx(tabla, "Informe");
+            var base64 = Convert.ToBase64String(bytes);
+            await JS.InvokeVoidAsync("ImperiumDescargas.descargar", base64, "InformeContingencias.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        }
+        finally
+        {
+            exportando = false;
+        }
+    }
+
+    private static string? NuloSiVacio(string valor) => string.IsNullOrWhiteSpace(valor) ? null : valor;
+}

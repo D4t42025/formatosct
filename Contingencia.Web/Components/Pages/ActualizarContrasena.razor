@@ -1,0 +1,112 @@
+﻿@page "/actualizar-contrasena"
+@layout LoginLayout
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using System.ComponentModel.DataAnnotations
+@using Contingencia.Application.Auth
+@using Contingencia.Application.Login
+@inject ICambioClaveService CambioClave
+
+<PageTitle>IMPERIUM - Actualizar contraseña</PageTitle>
+
+@* Migración de ActContraseña.aspx (legado) con el diseño nuevo de login. Cambia la contraseña del usuario en sesión: la clave actual
+   (o temporal) la verifica la base de datos (sp_MIP_CambiarClaveUsuario) y la política de la clave sigue siendo la del original
+   (12-20 caracteres, mayúscula, minúscula, número y símbolo, sin espacios, sin "_TEMPORAL", distinta de la actual). Lleva aquí al
+   usuario el login cuando la clave es temporal o vence (ver LoginService.DeterminarDestino). *@
+
+<h2>Actualizar contraseña</h2>
+<p class="lead">@(string.IsNullOrWhiteSpace(Msj) ? "Cree una contraseña nueva para continuar." : Msj)</p>
+
+@if (exito)
+{
+    <p class="form-msg ok show" role="status">Contraseña actualizada. Ya puede continuar.</p>
+    <a class="submit ready" href="/"><span class="go-t">Continuar</span><i class="bar"></i></a>
+}
+else
+{
+    <EditForm Model="Input" FormName="cambiar-clave" OnValidSubmit="CambiarAsync" method="post" data-enhance="false" id="FORMCLAVE" novalidate>
+        <DataAnnotationsValidator />
+        @if (mensaje is not null)
+        {
+            <p class="form-msg err show" role="alert">@mensaje</p>
+        }
+        <div class="field">
+            <label for="txtclave1">Contraseña actual o temporal</label>
+            <div class="control">
+                <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+                <InputText id="txtclave1" type="password" @bind-Value="Input.ClaveActual" autocomplete="current-password" placeholder="Actual o temporal" />
+                <button class="toggle" type="button" aria-label="Mostrar contraseña" aria-pressed="false"><svg class="on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg class="off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.8M6.5 7.6A17 17 0 0 0 2 12s3.6 7 10 7a9.8 9.8 0 0 0 4-.9M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></button>
+            </div>
+        </div>
+        <div class="field">
+            <label for="txtclave2">Contraseña nueva</label>
+            <div class="control">
+                <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+                <InputText id="txtclave2" type="password" @bind-Value="Input.ClaveNueva" autocomplete="new-password" placeholder="Nueva contraseña" />
+                <button class="toggle" type="button" aria-label="Mostrar contraseña" aria-pressed="false"><svg class="on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg class="off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.8M6.5 7.6A17 17 0 0 0 2 12s3.6 7 10 7a9.8 9.8 0 0 0 4-.9M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></button>
+            </div>
+        </div>
+        <div class="field">
+            <label for="txtclave3">Confirmar contraseña nueva</label>
+            <div class="control">
+                <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+                <InputText id="txtclave3" type="password" @bind-Value="Input.Confirmacion" autocomplete="new-password" placeholder="Repita la nueva" />
+                <button class="toggle" type="button" aria-label="Mostrar contraseña" aria-pressed="false"><svg class="on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg class="off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.8M6.5 7.6A17 17 0 0 0 2 12s3.6 7 10 7a9.8 9.8 0 0 0 4-.9M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></button>
+            </div>
+        </div>
+        <ul class="rules">
+            <li><strong>12 a 20</strong> caracteres, sin espacios.</li>
+            <li>Mayúscula, minúscula, número y símbolo.</li>
+            <li>Sin "_TEMPORAL" y distinta de la anterior.</li>
+        </ul>
+        <button class="submit ready" id="btnactclave" type="submit"><span class="go-t">Actualizar contraseña</span><i class="bar"></i></button>
+    </EditForm>
+}
+
+<script src="js/clave-toggle.js"></script>
+
+@code {
+    [SupplyParameterFromQuery(Name = "msj")]
+    private string? Msj { get; set; }
+
+    [SupplyParameterFromForm(FormName = "cambiar-clave")]
+    private CambioClaveInput? Input { get; set; }
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    private string? mensaje;
+    private bool exito;
+
+    protected override void OnInitialized() => Input ??= new CambioClaveInput();
+
+    private async Task CambiarAsync()
+    {
+        var usuario = HttpContext.User.UsuApp();
+        var resultado = await CambioClave.CambiarAsync(usuario, Input!.ClaveActual, Input.ClaveNueva, Input.Confirmacion);
+
+        if (resultado.Exito)
+        {
+            exito = true;
+            mensaje = null;
+            return;
+        }
+
+        mensaje = resultado.Mensaje;
+        Input.ClaveActual = "";
+        Input.ClaveNueva = "";
+        Input.Confirmacion = "";
+    }
+
+    private class CambioClaveInput
+    {
+        [Required(ErrorMessage = "Ingrese su contraseña actual o temporal")]
+        public string ClaveActual { get; set; } = "";
+
+        [Required(ErrorMessage = "Ingrese la contraseña nueva")]
+        public string ClaveNueva { get; set; } = "";
+
+        [Required(ErrorMessage = "Confirme la contraseña nueva")]
+        public string Confirmacion { get; set; } = "";
+    }
+}

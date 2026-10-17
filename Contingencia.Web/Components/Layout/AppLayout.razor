@@ -1,0 +1,217 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@using System.Linq
+@using Contingencia.Application.Auth
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Navigation
+
+@* Equivalente a SiteMipresN.Master/.vb del legado — reconstruido con la misma hoja de
+   estilos (AppLayout.razor.css) y el mismo js/app-layout.js que ya usa Recobros para su
+   propio AppLayout, en vez de portar el theme de administración de ~37MB que trae el
+   legado (owl-carousel, apexcharts, datatables, MetisMenu, un chat en tiempo real casi
+   todo dead-code — ver BASE_DE_DATOS.md, sección "Página 3: Inicio"). Solo se reconstruye
+   lo que realmente se ve y funciona para el rol 601 (Contingencia).
+
+   2026-10-16: unificado visualmente con el sidebar/topbar de IMPERIUM 3 (Pages/Shared/
+   _LayoutPublic.cshtml del proyecto IMPERIUM LINUX, usado solo como referencia de diseño,
+   sin tocar ese proyecto) — sidebar oscuro con degradado, grupo "Mipres" colapsable con
+   línea lateral, botón de colapsar a modo ícono, y topbar con breadcrumb + badge de sesión
+   + avatar con iniciales. La lógica de permisos (TieneModuloExacto) y las rutas del menú
+   no cambiaron, solo su presentación. *@
+<CascadingAuthenticationState>
+    <AuthorizeView>
+        <Authorized>
+            <div class="app-shell">
+                <div class="app-sidebar-backdrop" onclick="ImperiumLayout.closeSidebar()"></div>
+                <aside class="app-sidebar">
+                    <div class="app-sidebar-header">
+                        <span class="app-brand-card">
+                            <img src="OpcionesN/assetsN/images/logo.jpg" alt="Imperium" class="app-logo app-logo-full" />
+                            <img src="OpcionesN/assetsN/images/logo.jpg" alt="Imperium" class="app-logo app-logo-small" />
+                        </span>
+                    </div>
+
+                    <nav class="app-nav" aria-label="Menú principal">
+                        @if (context.User.TieneModuloExacto("Contingencia"))
+                        {
+                            bool mipresActivo = EsSeccionActiva("/inicio") || EsSeccionActiva("/formatos");
+                            <div class="app-nav-section"><span>Mipres</span></div>
+                            <details class="app-nav-group" open="@mipresActivo">
+                                <summary class="app-nav-link app-nav-group-toggle @(mipresActivo ? "has-active" : "")">
+                                    <span class="app-nav-group-left">
+                                        <span class="app-nav-icon"><i class="fa-solid fa-globe"></i></span>
+                                        <span class="app-nav-label">Formatos</span>
+                                    </span>
+                                    <i class="fa-solid fa-chevron-right app-nav-caret"></i>
+                                </summary>
+                                <div class="app-nav-subgroup">
+                                    <a href="/inicio" class="app-nav-sublink @(EsSeccionActiva("/inicio") || EsSeccionActiva("/formatos/cargar") || EsSeccionActiva("/formatos/consultar") ? "active" : "")">
+                                        <span class="app-nav-icon"><i class="fa-solid fa-file-lines"></i></span>
+                                        <span class="app-nav-label">Formato contingencia</span>
+                                    </a>
+                                    <a href="/formatos/contingencias/nueva" class="app-nav-sublink @(EsSeccionActiva("/formatos/contingencias/nueva") ? "active" : "")">
+                                        <span class="app-nav-icon"><i class="fa-solid fa-file-circle-plus"></i></span>
+                                        <span class="app-nav-label">Nueva contingencia</span>
+                                    </a>
+                                    <a href="/formatos/contingencias/consultar" class="app-nav-sublink @(EsSeccionActiva("/formatos/contingencias/consultar") ? "active" : "")">
+                                        <span class="app-nav-icon"><i class="fa-solid fa-magnifying-glass"></i></span>
+                                        <span class="app-nav-label">Consultar nueva contingencia</span>
+                                    </a>
+                                </div>
+                            </details>
+                        }
+
+                        @if (context.User.TieneModuloExacto("Junta Profesionales") || context.User.TieneModuloExacto("Profesionales"))
+                        {
+                            <div class="app-nav-section"><span>Gestión</span></div>
+                        }
+
+                        @if (context.User.TieneModuloExacto("Junta Profesionales"))
+                        {
+                            <a href="/juntas" class="app-nav-link @(EsSeccionActiva("/juntas") ? "active" : "")">
+                                <span class="app-nav-icon"><i class="fa-solid fa-user-doctor"></i></span>
+                                <span class="app-nav-label">Junta Profesional</span>
+                            </a>
+                        }
+
+                        @if (context.User.TieneModuloExacto("Junta Profesionales") || context.User.TieneModuloExacto("Profesionales"))
+                        {
+                            <a href="/profesionales" class="app-nav-link @(EsSeccionActiva("/profesionales") ? "active" : "")">
+                                <span class="app-nav-icon"><i class="fa-solid fa-address-card"></i></span>
+                                <span class="app-nav-label">Profesionales</span>
+                            </a>
+                        }
+
+                        <div class="app-nav-section"><span>Soporte</span></div>
+                        <a href="/sugerencias" class="app-nav-link @(EsSeccionActiva("/sugerencias") ? "active" : "")">
+                            <span class="app-nav-icon"><i class="fa-solid fa-gift"></i></span>
+                            <span class="app-nav-label">PQR</span>
+                        </a>
+                    </nav>
+
+                    <div class="app-sidebar-collapse-wrap">
+                        <button type="button" class="app-sidebar-collapse-btn" onclick="ImperiumLayout.toggleCollapse()" aria-label="Colapsar o expandir el menú" title="Colapsar menú">
+                            <i class="fa-solid fa-angles-left app-collapse-icon"></i>
+                            <span class="app-collapse-label">Colapsar</span>
+                        </button>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(context.User.LogoEmpresa()))
+                    {
+                        <div class="app-sidebar-cliente">
+                            <div class="app-sidebar-cliente-card">
+                                <img src="@context.User.LogoEmpresa()" alt="Logo del cliente" />
+                            </div>
+                        </div>
+                    }
+                </aside>
+
+                <div class="app-main">
+                    <header class="app-topbar">
+                        <div class="app-topbar-left">
+                            <button type="button" class="app-menu-toggle" onclick="ImperiumLayout.toggleSidebar()" aria-label="Mostrar/ocultar menú">
+                                <i class="fa-solid fa-bars"></i>
+                            </button>
+                            <div class="app-breadcrumb">
+                                <span class="app-breadcrumb-icon" aria-hidden="true"><i class="fa-solid @TituloIcono()"></i></span>
+                                <div class="app-breadcrumb-text">
+                                    <span class="app-breadcrumb-over">@(string.IsNullOrWhiteSpace(context.User.NombreCliente()) ? "IMPERIUM" : context.User.NombreCliente())</span>
+                                    <span class="app-breadcrumb-title">@TituloPagina()</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="app-topbar-right">
+                            <div class="app-session-badge" title="Conexión cifrada y sesión autenticada">
+                                <span class="app-session-dot"></span>
+                                <span>Sesión segura</span>
+                            </div>
+                            <span class="app-topbar-sep" aria-hidden="true"></span>
+                            <div class="app-user-block">
+                                <span class="app-avatar">
+                                    <span class="app-avatar-in">@Iniciales(context.User.Nombre())</span>
+                                </span>
+                                <span class="app-user-text">
+                                    <span class="app-user-name">@context.User.Nombre()</span>
+                                    <span class="app-role-pill">@context.User.Rol()</span>
+                                </span>
+                            </div>
+                            <form method="post" action="cerrar-sesion" data-enhance="false">
+                                <button type="submit" class="app-logout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">
+                                    <i class="fa-solid fa-right-from-bracket"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </header>
+                    <main class="app-content">
+                        @Body
+                    </main>
+                    <footer class="app-footer">
+                        <p><strong>Imperium-DQS</strong> © 2025 All Rights Reserved</p>
+                        <p>by Data Quality Solutions</p>
+                    </footer>
+                </div>
+            </div>
+            <script src="js/app-layout.js"></script>
+        </Authorized>
+        <NotAuthorized>
+            @* Réplica de SiteMipresN.Master.vb: "If Session("rol") Is Nothing Or Session("cia")
+               Is Nothing Then ... Opciones.aspx" — misma ruta de esta app ("/"). *@
+            @{ Navigation.NavigateTo("/", forceLoad: true); }
+        </NotAuthorized>
+    </AuthorizeView>
+</CascadingAuthenticationState>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += ManejarCambioDeRuta;
+    }
+
+    private void ManejarCambioDeRuta(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        InvokeAsync(StateHasChanged);
+
+    // Antes el "active" del menú lateral estaba fijo en el markup (siempre en "Formato
+    // contingencia", ni siquiera dependía de la ruta) — ahora refleja la ruta real.
+    private bool EsSeccionActiva(string prefijo) =>
+        new Uri(Navigation.Uri).AbsolutePath.StartsWith(prefijo, StringComparison.OrdinalIgnoreCase);
+
+    // Breadcrumb del topbar (igual al de IMPERIUM 3): título + ícono según la ruta activa,
+    // en vez de repetir el nombre del cliente en el título como hacía la versión anterior.
+    private string TituloPagina()
+    {
+        if (EsSeccionActiva("/formatos/contingencias/nueva")) return "Nueva contingencia";
+        if (EsSeccionActiva("/formatos/contingencias/consultar")) return "Consultar nueva contingencia";
+        if (EsSeccionActiva("/inicio") || EsSeccionActiva("/formatos")) return "Formato contingencia";
+        if (EsSeccionActiva("/juntas")) return "Junta Profesional";
+        if (EsSeccionActiva("/profesionales")) return "Profesionales";
+        if (EsSeccionActiva("/sugerencias")) return "PQR";
+        return "Imperium";
+    }
+
+    private string TituloIcono()
+    {
+        if (EsSeccionActiva("/formatos/contingencias/nueva")) return "fa-file-circle-plus";
+        if (EsSeccionActiva("/formatos/contingencias/consultar")) return "fa-magnifying-glass";
+        if (EsSeccionActiva("/inicio") || EsSeccionActiva("/formatos")) return "fa-globe";
+        if (EsSeccionActiva("/juntas")) return "fa-user-doctor";
+        if (EsSeccionActiva("/profesionales")) return "fa-address-card";
+        if (EsSeccionActiva("/sugerencias")) return "fa-gift";
+        return "fa-grid-2";
+    }
+
+    private static string Iniciales(string nombre)
+    {
+        if (string.IsNullOrWhiteSpace(nombre)) return "U";
+        var partes = nombre.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2);
+        var iniciales = string.Concat(partes.Select(p => char.ToUpperInvariant(p[0])));
+        return string.IsNullOrEmpty(iniciales) ? "U" : iniciales;
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= ManejarCambioDeRuta;
+}

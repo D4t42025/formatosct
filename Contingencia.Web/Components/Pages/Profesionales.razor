@@ -1,0 +1,494 @@
+@page "/profesionales"
+@layout AppLayout
+@attribute [Authorize(Policy = ImperiumPolicies.ModuloProfesionales)]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Contingencia.Application.Auth
+@using Contingencia.Application.Profesionales
+@using Contingencia.Infrastructure.Profesionales
+@using Contingencia.Web.Services
+@inject IProfesionalesService Servicio
+@inject IProfesionalFirmaArchivoService ArchivoFirma
+@inject IJSRuntime JS
+
+@* Equivalente a MIP_PROFESIONALES.aspx (legado, agregado 2026-09-25 — ver BASE_DE_DATOS.md
+   sección "Página 10"). CRUD de DQS_MIP_PROFESIONALES: "Inactivar" NO borra la fila (cambia
+   ESTADO a 0), y cada profesional tiene su espejo en DQS_REC_USUARIOS (se crea/actualiza/
+   inactiva junto con el profesional, dentro de la misma transacción del procedimiento).
+
+   La captura de firma admite dibujo a mano en canvas o archivo subido — ambas se guardan
+   localmente bajo App_Data (no en la carpeta pública del legado), con la MISMA forma de
+   ruta relativa, para que ActaPdfBuilder (vía IFirmaImagenService) las resuelva igual sin
+   importar cuál app las escribió. A diferencia del legado (que resuelve un "usuario" con
+   sp_DQS_MIP_ProfesionalesResolverUsuario para nombrar la carpeta), acá se usa directamente
+   el número de documento — evita necesitar soporte de parámetros de salida en
+   IStoredProcedureExecutor, y el documento ya es único por CIA (mismo criterio que valida
+   el propio procedimiento de alta). *@
+
+<PageTitle>Profesionales</PageTitle>
+
+<div class="fmt-header">
+    <h1><i class="fa-solid fa-address-card"></i> Profesionales</h1>
+    <p>Profesionales que pueden integrar una junta y firmar actas.</p>
+</div>
+
+<div class="fmt-card">
+    <div class="pf-resumen">
+        <div class="pf-resumen-item"><span class="pf-resumen-numero">@resumen.Total</span><span>Total</span></div>
+        <div class="pf-resumen-item"><span class="pf-resumen-numero">@resumen.Activos</span><span>Activos</span></div>
+        <div class="pf-resumen-item"><span class="pf-resumen-numero">@resumen.Inactivos</span><span>Inactivos</span></div>
+        <div class="pf-resumen-item"><span class="pf-resumen-numero">@resumen.Sedes</span><span>Sedes</span></div>
+    </div>
+</div>
+
+<div class="fmt-card">
+    <div class="fmt-row">
+        <div class="fmt-campo">
+            <label class="fmt-label">Buscar</label>
+            <input class="fmt-input" @bind="busqueda" @bind:event="oninput" placeholder="Documento, nombre, correo o celular" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Profesión</label>
+            <select class="fmt-select" @bind="filtroProfesion">
+                <option value="">Todas</option>
+                @foreach (var p in listaProfesiones)
+                {
+                    <option value="@p">@p</option>
+                }
+            </select>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Sede</label>
+            <select class="fmt-select" @bind="filtroSede">
+                <option value="">Todas</option>
+                @foreach (var s in listaSedes)
+                {
+                    <option value="@s">@s</option>
+                }
+            </select>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Estado</label>
+            <select class="fmt-select" @bind="filtroEstado">
+                <option value="">Todos</option>
+                <option value="1">Activos</option>
+                <option value="0">Inactivos</option>
+            </select>
+        </div>
+    </div>
+    <div class="fmt-acciones">
+        <button type="button" class="fmt-btn" @onclick="BuscarAsync">Buscar</button>
+        <button type="button" class="fmt-btn-secundario" @onclick="AbrirNuevoAsync">Nuevo profesional</button>
+    </div>
+</div>
+
+@if (mensaje is not null)
+{
+    <p class="fmt-ayuda">@mensaje</p>
+}
+
+<div class="fmt-card">
+    @if (profesionales.Count == 0)
+    {
+        <p class="fmt-vacio">No hay profesionales para los filtros seleccionados.</p>
+    }
+    else
+    {
+        <div class="fmt-tabla-scroll">
+            <table class="fmt-tabla">
+                <thead>
+                    <tr>
+                        <th>Profesional</th>
+                        <th>Profesión</th>
+                        <th>Sede / Servicio</th>
+                        <th>Contacto</th>
+                        <th>Estado</th>
+                        <th>Usuario app</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in FilasPagina)
+                    {
+                        <tr>
+                            <td>@p.NoIdentificacion<br /><strong>@p.NombreCompleto</strong></td>
+                            <td>@p.Profesion</td>
+                            <td>@p.Sede<br />@p.Servicio</td>
+                            <td>@p.CorreoElectronico<br />@p.Celular</td>
+                            <td><span class="fmt-estado">@p.EstadoDesc</span></td>
+                            <td>@(string.IsNullOrEmpty(p.UsuarioApp) ? "—" : p.UsuarioApp)</td>
+                            <td>
+                                <button type="button" class="fmt-icono-btn" title="Editar" @onclick="() => AbrirEditarAsync(p.IdProfesional)">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button type="button" class="fmt-icono-btn" title="@(p.Estado ? "Inactivar" : "Reactivar")"
+                                        @onclick="() => CambiarEstadoAsync(p)">
+                                    <i class="fa-solid @(p.Estado ? "fa-user-slash" : "fa-user-check")"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="fmt-paginacion">
+            <select class="fmt-select" style="width:auto" value="@tamanioPagina" @onchange="CambiarTamanioPaginaAsync">
+                <option value="10">10 / página</option>
+                <option value="25">25 / página</option>
+                <option value="50">50 / página</option>
+                <option value="100">100 / página</option>
+            </select>
+            <button type="button" class="fmt-btn-secundario" disabled="@(paginaActual <= 1)" @onclick="() => IrAPagina(paginaActual - 1)">Anterior</button>
+            <span>Página @paginaActual de @TotalPaginas</span>
+            <button type="button" class="fmt-btn-secundario" disabled="@(paginaActual >= TotalPaginas)" @onclick="() => IrAPagina(paginaActual + 1)">Siguiente</button>
+        </div>
+    }
+</div>
+
+@if (mostrarModal)
+{
+    <div class="fmt-modal-fondo" @onclick="CerrarModal">
+        <div class="fmt-modal" @onclick:stopPropagation="true" style="max-width:720px">
+            <div class="fmt-modal-encabezado">
+                <h3>@(idEditando is null ? "Nuevo profesional" : "Editar profesional")</h3>
+                <button type="button" class="fmt-modal-cerrar" @onclick="CerrarModal">&times;</button>
+            </div>
+            <div class="fmt-modal-cuerpo">
+                @if (mensajeModal is not null)
+                {
+                    <p class="fmt-ayuda">@mensajeModal</p>
+                }
+
+                <div class="fmt-row">
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Tipo de documento</label>
+                        <select class="fmt-select" @bind="form.TipoDoc">
+                            <option value="CC">Cédula de ciudadanía</option>
+                            <option value="CE">Cédula de extranjería</option>
+                            <option value="TI">Tarjeta de identidad</option>
+                            <option value="PA">Pasaporte</option>
+                            <option value="RC">Registro civil</option>
+                        </select>
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Número de documento</label>
+                        <input class="fmt-input" @bind="form.NoIdentificacion" />
+                    </div>
+                </div>
+                <div class="fmt-row">
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Apellidos</label>
+                        <input class="fmt-input" @bind="form.Apellidos" />
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Nombres</label>
+                        <input class="fmt-input" @bind="form.Nombres" />
+                    </div>
+                </div>
+                <div class="fmt-row">
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Profesión</label>
+                        <input class="fmt-input" list="dl-profesiones" @bind="form.Profesion" />
+                        <datalist id="dl-profesiones">@foreach (var p in listaProfesiones) { <option value="@p"></option> }</datalist>
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Sede</label>
+                        <input class="fmt-input" list="dl-sedes" @bind="form.Sede" />
+                        <datalist id="dl-sedes">@foreach (var s in listaSedes) { <option value="@s"></option> }</datalist>
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Servicio</label>
+                        <input class="fmt-input" @bind="form.Servicio" />
+                    </div>
+                </div>
+                <div class="fmt-row">
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Correo electrónico</label>
+                        <input class="fmt-input" type="email" @bind="form.Correo" />
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Celular</label>
+                        <input class="fmt-input" @bind="form.Celular" />
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Fecha de activación</label>
+                        <input class="fmt-input" @bind="form.FActivacion" placeholder="AAAA-MM-DD" />
+                    </div>
+                </div>
+
+                <div class="fmt-campo-ancho">
+                    <label class="fmt-label">Firma</label>
+                    <div class="pf-firma-tabs">
+                        <button type="button" class="@(modoFirma == "dibujo" ? "fmt-btn" : "fmt-btn-secundario")" @onclick="CambiarADibujoAsync">Dibujar</button>
+                        <button type="button" class="@(modoFirma == "archivo" ? "fmt-btn" : "fmt-btn-secundario")" @onclick="CambiarAArchivoAsync">Subir archivo</button>
+                    </div>
+
+                    @if (modoFirma == "dibujo")
+                    {
+                        <div class="pf-firma-canvas-wrap">
+                            <canvas id="pf-canvas-firma" width="400" height="150"></canvas>
+                        </div>
+                        <div class="fmt-acciones">
+                            <button type="button" class="fmt-btn-secundario" @onclick="LimpiarDibujoAsync">Limpiar</button>
+                            <button type="button" class="fmt-btn-secundario" @onclick="GuardarDibujoAsync">Usar este dibujo</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <InputFile class="fmt-file" OnChange="OnArchivoFirmaSeleccionadoAsync" accept=".jpg,.jpeg,.png,.bmp,.gif,.pdf" />
+                    }
+
+                    @if (firmaDataUri is not null)
+                    {
+                        <p class="fmt-ayuda">Firma actual:</p>
+                        <img src="@firmaDataUri" alt="Firma" class="pf-firma-preview" />
+                    }
+                    else if (!string.IsNullOrEmpty(form.Firma))
+                    {
+                        <p class="fmt-ayuda">Se guardó un archivo de firma (sin vista previa disponible para este formato).</p>
+                    }
+                </div>
+            </div>
+            <div class="fmt-modal-acciones fmt-acciones">
+                <button type="button" class="fmt-btn" disabled="@guardando" @onclick="GuardarAsync">@(guardando ? "Guardando…" : "Guardar")</button>
+                <button type="button" class="fmt-btn-secundario" @onclick="CerrarModal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string cia = "";
+    private string usuarioSesion = "";
+    private string? idEmpresa;
+
+    private ResumenProfesionales resumen = new(0, 0, 0, 0);
+    private List<string> listaProfesiones = [];
+    private List<string> listaSedes = [];
+    private List<ProfesionalMip> profesionales = [];
+    private string? mensaje;
+
+    private string busqueda = "";
+    private string filtroProfesion = "";
+    private string filtroSede = "";
+    private string filtroEstado = "";
+
+    private int tamanioPagina = 10;
+    private int paginaActual = 1;
+
+    private int TotalPaginas => Math.Max(1, (int)Math.Ceiling(profesionales.Count / (double)tamanioPagina));
+    private IEnumerable<ProfesionalMip> FilasPagina => profesionales.Skip((paginaActual - 1) * tamanioPagina).Take(tamanioPagina);
+
+    private bool mostrarModal;
+    private bool guardando;
+    private int? idEditando;
+    private string? mensajeModal;
+    private FormularioProfesional form = new();
+    private string modoFirma = "dibujo";
+    private string? firmaDataUri;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthStateTask is not null)
+        {
+            var estado = await AuthStateTask;
+            cia = estado.User.Cia();
+            usuarioSesion = estado.User.UsuApp();
+            idEmpresa = estado.User.IdEmp();
+        }
+
+        await CargarListasAsync();
+        await BuscarAsync();
+    }
+
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthStateTask { get; set; }
+
+    private async Task CargarListasAsync()
+    {
+        var (profesiones, sedes) = await Servicio.ObtenerListasAsync(cia);
+        listaProfesiones = profesiones;
+        listaSedes = sedes;
+        resumen = await Servicio.ObtenerResumenAsync(cia);
+    }
+
+    private async Task BuscarAsync()
+    {
+        profesionales = await Servicio.ConsultarAsync(cia, busqueda, filtroProfesion, filtroSede, filtroEstado);
+        paginaActual = 1;
+        mensaje = null;
+    }
+
+    private void IrAPagina(int pagina) => paginaActual = Math.Clamp(pagina, 1, TotalPaginas);
+
+    private async Task CambiarTamanioPaginaAsync(ChangeEventArgs e)
+    {
+        tamanioPagina = int.TryParse(Convert.ToString(e.Value), out var valor) ? valor : 10;
+        paginaActual = 1;
+        await Task.CompletedTask;
+    }
+
+    private async Task AbrirNuevoAsync()
+    {
+        idEditando = null;
+        form = new FormularioProfesional { TipoDoc = "CC" };
+        firmaDataUri = null;
+        mensajeModal = null;
+        mostrarModal = true;
+        await CambiarModoFirmaAsync("dibujo");
+    }
+
+    private async Task AbrirEditarAsync(int idProfesional)
+    {
+        var p = await Servicio.ObtenerAsync(cia, idProfesional);
+        if (p is null)
+        {
+            mensaje = "Ese profesional ya no existe.";
+            await BuscarAsync();
+            return;
+        }
+
+        idEditando = p.IdProfesional;
+        form = new FormularioProfesional
+        {
+            TipoDoc = string.IsNullOrEmpty(p.TipoDoc) ? "CC" : p.TipoDoc,
+            NoIdentificacion = p.NoIdentificacion,
+            Apellidos = p.Apellidos,
+            Nombres = p.Nombres,
+            Profesion = p.Profesion,
+            Sede = p.Sede,
+            Servicio = p.Servicio,
+            Correo = p.CorreoElectronico,
+            Celular = p.Celular,
+            FActivacion = p.FActivacion,
+            Firma = p.Firma,
+        };
+        firmaDataUri = await ArchivoFirma.ObtenerDataUriAsync(p.Firma);
+        mensajeModal = null;
+        mostrarModal = true;
+        await CambiarModoFirmaAsync("dibujo");
+    }
+
+    private void CerrarModal() => mostrarModal = false;
+
+    private Task CambiarADibujoAsync() => CambiarModoFirmaAsync("dibujo");
+
+    private Task CambiarAArchivoAsync() => CambiarModoFirmaAsync("archivo");
+
+    private async Task CambiarModoFirmaAsync(string modo)
+    {
+        modoFirma = modo;
+        StateHasChanged();
+        if (modo == "dibujo")
+        {
+            // Espera a que el <canvas> exista en el DOM antes de engancharle los eventos.
+            await Task.Delay(50);
+            await JS.InvokeVoidAsync("ImperiumFirmaCanvas.iniciar", "pf-canvas-firma");
+        }
+    }
+
+    private async Task LimpiarDibujoAsync() => await JS.InvokeVoidAsync("ImperiumFirmaCanvas.limpiar", "pf-canvas-firma");
+
+    private async Task GuardarDibujoAsync()
+    {
+        if (string.IsNullOrWhiteSpace(form.NoIdentificacion))
+        {
+            mensajeModal = "Ingrese primero el número de documento.";
+            return;
+        }
+
+        var tieneTrazo = await JS.InvokeAsync<bool>("ImperiumFirmaCanvas.tieneTrazo", "pf-canvas-firma");
+        if (!tieneTrazo)
+        {
+            mensajeModal = "Dibuje la firma antes de guardarla.";
+            return;
+        }
+
+        var dataUrl = await JS.InvokeAsync<string>("ImperiumFirmaCanvas.exportarPng", "pf-canvas-firma");
+        form.Firma = await ArchivoFirma.GuardarDibujoAsync(cia, form.NoIdentificacion.Trim(), dataUrl);
+        firmaDataUri = dataUrl;
+        mensajeModal = "Firma guardada.";
+    }
+
+    private async Task OnArchivoFirmaSeleccionadoAsync(InputFileChangeEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(form.NoIdentificacion))
+        {
+            mensajeModal = "Ingrese primero el número de documento.";
+            return;
+        }
+
+        try
+        {
+            await using var stream = e.File.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            form.Firma = await ArchivoFirma.GuardarArchivoAsync(cia, form.NoIdentificacion.Trim(), e.File.Name, stream);
+            firmaDataUri = await ArchivoFirma.ObtenerDataUriAsync(form.Firma);
+            mensajeModal = "Firma guardada.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            mensajeModal = ex.Message;
+        }
+    }
+
+    private async Task GuardarAsync()
+    {
+        if (string.IsNullOrWhiteSpace(form.NoIdentificacion) || string.IsNullOrWhiteSpace(form.Apellidos) || string.IsNullOrWhiteSpace(form.Nombres))
+        {
+            mensajeModal = "El número de identificación, los apellidos y los nombres son obligatorios.";
+            return;
+        }
+
+        guardando = true;
+        var solicitud = new SolicitudProfesional(
+            form.TipoDoc, form.NoIdentificacion.Trim(), form.Apellidos.Trim(), form.Nombres.Trim(),
+            form.Profesion?.Trim(), form.Sede?.Trim(), form.Servicio?.Trim(), form.Correo?.Trim(),
+            form.Celular?.Trim(), form.FActivacion, form.Firma);
+
+        var resultado = await Servicio.GuardarAsync(cia, idEditando, solicitud, usuarioSesion, idEmpresa);
+        guardando = false;
+
+        if (!resultado.Exito)
+        {
+            mensajeModal = resultado.Mensaje;
+            return;
+        }
+
+        await CargarListasAsync();
+        await BuscarAsync();
+        mostrarModal = false;
+
+        mensaje = resultado.ClaveApp.Length > 0
+            ? $"{resultado.Mensaje} Usuario: {resultado.UsuarioApp} — Contraseña: {resultado.ClaveApp} (anótela ahora, no se vuelve a mostrar)."
+            : resultado.Mensaje;
+    }
+
+    private async Task CambiarEstadoAsync(ProfesionalMip p)
+    {
+        var accion = p.Estado ? "inactivar" : "reactivar";
+        var confirmado = await JS.InvokeAsync<bool>("confirm", $"¿Seguro que desea {accion} a {p.NombreCompleto}?");
+        if (!confirmado) return;
+
+        var resultado = await Servicio.CambiarEstadoAsync(cia, p.IdProfesional, !p.Estado, usuarioSesion);
+        mensaje = resultado.Mensaje;
+        await CargarListasAsync();
+        await BuscarAsync();
+    }
+
+    private class FormularioProfesional
+    {
+        public string? TipoDoc { get; set; } = "CC";
+        public string NoIdentificacion { get; set; } = "";
+        public string? Apellidos { get; set; }
+        public string? Nombres { get; set; }
+        public string? Profesion { get; set; }
+        public string? Sede { get; set; }
+        public string? Servicio { get; set; }
+        public string? Correo { get; set; }
+        public string? Celular { get; set; }
+        public string? FActivacion { get; set; }
+        public string? Firma { get; set; }
+    }
+}

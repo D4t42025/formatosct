@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Contingencia.Application/Contingencia.Application.csproj" />
+  <Project Path="Contingencia.Domain/Contingencia.Domain.csproj" />
+  <Project Path="Contingencia.Infrastructure/Contingencia.Infrastructure.csproj" />
+  <Project Path="Contingencia.Web/Contingencia.Web.csproj" />
+</Solution>

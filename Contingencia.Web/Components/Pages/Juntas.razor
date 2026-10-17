@@ -1,0 +1,780 @@
+@page "/juntas"
+@layout AppLayout
+@attribute [Authorize(Policy = ImperiumPolicies.ModuloJuntas)]
+@rendermode InteractiveServer
+@using System.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Contingencia.Application.Auth
+@using Contingencia.Application.Juntas
+@using Contingencia.Infrastructure.Juntas
+@using Contingencia.Infrastructure.Mipres
+@using Contingencia.Web.Services
+@inject IJuntasService JuntasService
+@inject IJuntasFirmaService JuntasFirmaService
+@inject IJuntasArchivoService JuntasArchivoService
+@inject IExcelExportService Excel
+@inject IJSRuntime JS
+
+@* Equivalente a JuntaProfesional.aspx ("Junta Profesional", único destino/módulo del rol
+   60 — confirmado con el usuario de pruebas real "cwjuntas", CIA 890330031). Consulta la
+   API real de SISPRO (wsmipres.sispro.gov.co) por fecha, paciente o número(s) de
+   prescripción, y genera el acta de junta en PDF al vuelo (sin guardarla en disco, igual
+   que el legado) — ver BASE_DE_DATOS.md para el detalle completo de tablas/SP/API externa
+   y las decisiones de migración.
+
+   "Cargas" (JuntasCargueDoc.aspx) y "Firma" (JuntasFirma.aspx) están migrados como
+   MODALES dentro de esta misma página (2026-09-03, a pedido explícito del usuario: "que
+   queden en modales en la misma ventana y no en modales nuevas") — antes enlazaban al
+   legado en una pestaña nueva. Solo se migró la funcionalidad que realmente se ejecuta en
+   el legado: el lienzo de captura de firma a mano alzada de JuntasFirma.aspx (canvas +
+   WebMethod UploadImage) está dentro de un bloque comentado en el propio .aspx —
+   código muerto, inalcanzable desde la UI real — y no se migró (ver BASE_DE_DATOS.md). *@
+
+<PageTitle>Junta Profesional</PageTitle>
+
+<div class="fmt-header">
+    <h1><i class="fa-solid fa-user-doctor"></i> Junta Profesional</h1>
+    <p>Ingrese los filtros que desee y de clic en "Consultar".</p>
+</div>
+
+<div class="fmt-card">
+    <div class="fmt-row">
+        <div class="fmt-campo">
+            <label class="fmt-label">Fecha Inicio</label>
+            <input type="date" class="fmt-input" value="@fechaInicio" @onchange="e => fechaInicio = e.Value?.ToString() ?? string.Empty" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Fecha Fin</label>
+            <input type="date" class="fmt-input" value="@fechaFin" @onchange="e => fechaFin = e.Value?.ToString() ?? string.Empty" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Estado (Opcional)</label>
+            <select class="fmt-select" @bind="estado">
+                <option value="%">Seleccione..</option>
+                <option value="1">No requiere junta de profesionales</option>
+                <option value="2">Requiere junta de profesionales y pendiente evaluación</option>
+                <option value="3">Evaluada por la junta de profesionales y fue aprobada</option>
+                <option value="4">Evaluada por la junta de profesionales y no fue aprobada</option>
+            </select>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Régimen</label>
+            <select class="fmt-select" @bind="regimen">
+                <option value="Contributivo">Contributivo</option>
+                <option value="Subsidiado">Subsidiado</option>
+            </select>
+        </div>
+        <div class="fmt-campo fmt-campo-ancho">
+            <label class="fmt-label">N° Prescripción (uno o varios, separados por coma o espacio)</label>
+            <input type="text" class="fmt-input" @bind="noPrescripcion" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Tipo de documento</label>
+            <select class="fmt-select" @bind="tipoDoc">
+                <option value="%">Seleccione..</option>
+                <option value="CD">Carné diplomático</option>
+                <option value="CC">Cédula de ciudadanía</option>
+                <option value="CE">Cédula de extranjería</option>
+                <option value="NV">Certificado de nacido vivo</option>
+                <option value="NI">NIT</option>
+                <option value="PA">Pasaporte</option>
+                <option value="PT">PERMISO POR PROTECCIÓN TEMPORAL</option>
+                <option value="PR">Pasaporte de la ONU</option>
+                <option value="PE">Permiso Especial de Permanencia</option>
+                <option value="RC">Registro civil</option>
+                <option value="SC">Salvo conducto de permanencia</option>
+                <option value="TI">Tarjeta de identidad</option>
+            </select>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">N° documento Paciente</label>
+            <input type="text" class="fmt-input" @bind="numDoc" @bind:event="oninput" />
+        </div>
+    </div>
+
+    <div class="fmt-acciones">
+        <button type="button" class="fmt-btn" disabled="@consultando" @onclick="ConsultarAsync">
+            <i class="fa-solid fa-magnifying-glass"></i> @(consultando ? "Consultando..." : "Consultar")
+        </button>
+        <button type="button" class="fmt-btn-secundario" disabled="@(exportando || resultados is null)" @onclick="ExportarAsync">
+            <i class="fa-solid fa-file-excel"></i> @(exportando ? "Exportando..." : "Exportar a Excel")
+        </button>
+    </div>
+</div>
+
+@if (resultados is not null)
+{
+    <div class="fmt-card" style="margin-top:1.25rem">
+        @if (resultados.Count == 0)
+        {
+            <p class="fmt-vacio">No se encontraron resultados con los criterios ingresados.</p>
+        }
+        else
+        {
+            <div class="fmt-tabla-scroll">
+                <table class="fmt-tabla">
+                    <thead>
+                        <tr>
+                            <th>Pdf Junta</th>
+                            <th>Cargas</th>
+                            <th>Firma</th>
+                            <th>Correo</th>
+                            <th>No Prescripción</th>
+                            <th>Fecha</th>
+                            <th>Tipo Tecnología</th>
+                            <th>Consecutivo</th>
+                            <th>Estado</th>
+                            <th>Cod Ent Proc</th>
+                            <th>Observaciones</th>
+                            <th>Justificación Técnica</th>
+                            <th>Modalidad</th>
+                            <th>No Acta</th>
+                            <th>Fecha Acta</th>
+                            <th>F Proceso</th>
+                            <th>Tipo Id Paciente</th>
+                            <th>Nro Id Paciente</th>
+                            <th>Cod Ent JM</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var f in FilasPagina)
+                        {
+                            <tr>
+                                <td>
+                                    <a href="@UrlActa(f)" target="_blank" title="Ver acta en PDF">
+                                        <i class="fa-solid fa-file-pdf"></i>
+                                    </a>
+                                </td>
+                                <td>
+                                    <button type="button" class="fmt-icono-btn" title="Cargas" @onclick="() => AbrirModalCargas(f)">
+                                        <i class="fa-solid @(JuntasArchivoService.TieneArchivos(cia, f.NoPrescripcion) ? "fa-check-double" : "fa-cloud-arrow-up")"></i>
+                                    </button>
+                                </td>
+                                <td>
+                                    <button type="button" class="fmt-icono-btn" title="Firma" @onclick="() => AbrirModalFirma(f)">
+                                        <i class="fa-solid fa-signature"></i>
+                                    </button>
+                                </td>
+                                <td>
+                                    <button type="button" class="fmt-icono-btn" title="Enviar acta por correo" @onclick="() => AbrirModalCorreo(f)">
+                                        <i class="fa-solid fa-paper-plane"></i>
+                                    </button>
+                                </td>
+                                <td>@f.NoPrescripcion</td>
+                                <td>@f.FPrescripcion</td>
+                                <td>@f.TipoTecnologia</td>
+                                <td>@f.Consecutivo</td>
+                                <td><span class="fmt-estado">@TraducirEstado(f.EstJM)</span></td>
+                                <td>@f.CodEntProc</td>
+                                <td>@f.Observaciones</td>
+                                <td>@f.JustificacionTecnica</td>
+                                <td>@f.Modalidad</td>
+                                <td>@f.NoActa</td>
+                                <td>@f.FechaActa</td>
+                                <td>@f.FProceso</td>
+                                <td>@f.TipoIDPaciente</td>
+                                <td>@f.NroIDPaciente</td>
+                                <td>@f.CodEntJM</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (TotalPaginas > 1)
+            {
+                <div class="fmt-paginacion">
+                    <button type="button" class="fmt-btn-secundario" disabled="@(paginaActual <= 1)" @onclick="() => IrAPagina(paginaActual - 1)">
+                        <i class="fa-solid fa-chevron-left"></i> Anterior
+                    </button>
+                    <span>Página @paginaActual de @TotalPaginas (@resultados.Count resultados)</span>
+                    <button type="button" class="fmt-btn-secundario" disabled="@(paginaActual >= TotalPaginas)" @onclick="() => IrAPagina(paginaActual + 1)">
+                        Siguiente <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                </div>
+            }
+        }
+    </div>
+}
+
+@* ---- Modal "Cargas" (JuntasCargueDoc.aspx) ---- *@
+@if (mostrarModalCargas && filaCargas is not null)
+{
+    <div class="fmt-modal-fondo" @onclick="CerrarModalCargas">
+        <div class="fmt-modal" @onclick:stopPropagation="true" style="max-width:640px">
+            <div class="fmt-modal-encabezado">
+                <h3>Cargue de documentos — Prescripción @filaCargas.NoPrescripcion</h3>
+                <button type="button" class="fmt-modal-cerrar" @onclick="CerrarModalCargas">&times;</button>
+            </div>
+            <div class="fmt-modal-cuerpo">
+                <p class="fmt-vacio" style="margin:0">Seleccione los archivos y de clic en "Cargar".</p>
+                <div class="fmt-file">
+                    <InputFile OnChange="OnArchivosCargueSeleccionadosAsync" multiple />
+                </div>
+                <div class="fmt-acciones" style="margin-top:0">
+                    <button type="button" class="fmt-btn" disabled="@(subiendoCargue || archivosSeleccionados.Count == 0)" @onclick="SubirArchivosCargueAsync">
+                        <i class="fa-solid fa-upload"></i> @(subiendoCargue ? "Cargando..." : "Cargar")
+                    </button>
+                </div>
+                @if (mensajeCargue is not null)
+                {
+                    <p class="fmt-ayuda">@mensajeCargue</p>
+                }
+                <div class="fmt-tabla-scroll" style="max-height:260px">
+                    <table class="fmt-tabla">
+                        <thead><tr><th>Archivo</th><th>Ver</th><th>Eliminar</th></tr></thead>
+                        <tbody>
+                            @if (archivosCargue.Count == 0)
+                            {
+                                <tr><td colspan="3" class="fmt-vacio">Sin archivos cargados</td></tr>
+                            }
+                            @foreach (var a in archivosCargue)
+                            {
+                                <tr>
+                                    <td>@a.Nombre</td>
+                                    <td><a href="@a.Url" target="_blank">Ver</a></td>
+                                    <td>
+                                        <button type="button" class="fmt-icono-btn" title="Eliminar" @onclick="() => EliminarArchivoCargue(a.Nombre)">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ---- Modal "Firma" (JuntasFirma.aspx) ---- *@
+@if (mostrarModalFirma && filaFirma is not null)
+{
+    <div class="fmt-modal-fondo" @onclick="CerrarModalFirma">
+        <div class="fmt-modal" @onclick:stopPropagation="true" style="max-width:880px">
+            <div class="fmt-modal-encabezado">
+                <h3>Firma de junta — Acta @filaFirma.NoActa</h3>
+                <button type="button" class="fmt-modal-cerrar" @onclick="CerrarModalFirma">&times;</button>
+            </div>
+            <div class="fmt-modal-cuerpo">
+                <p class="fmt-vacio" style="margin:0">Búsqueda de profesionales</p>
+                <div class="fmt-row">
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Documento</label>
+                        <input class="fmt-input" @bind="firmaDocumento" @bind:event="oninput" />
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Nombre</label>
+                        <input class="fmt-input" @bind="firmaNombre" @bind:event="oninput" />
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Profesión</label>
+                        <input class="fmt-input" @bind="firmaProfesion" @bind:event="oninput" />
+                    </div>
+                    <div class="fmt-campo">
+                        <label class="fmt-label">Servicio</label>
+                        <input class="fmt-input" @bind="firmaServicio" @bind:event="oninput" />
+                    </div>
+                </div>
+                <div class="fmt-acciones" style="margin-top:0">
+                    <button type="button" class="fmt-btn" disabled="@buscandoFirma" @onclick="BuscarProfesionalesAsync">
+                        <i class="fa-solid fa-magnifying-glass"></i> @(buscandoFirma ? "Buscando..." : "Buscar")
+                    </button>
+                </div>
+                @if (mensajeFirma is not null)
+                {
+                    <p class="fmt-ayuda">@mensajeFirma</p>
+                }
+
+                @if (profesionalesEncontrados.Count > 0)
+                {
+                    <div class="fmt-tabla-scroll" style="max-height:220px">
+                        <table class="fmt-tabla">
+                            <thead><tr><th>Asignar</th><th>Documento</th><th>Nombre</th><th>Profesión</th><th>Servicio</th></tr></thead>
+                            <tbody>
+                                @foreach (var p in profesionalesEncontrados)
+                                {
+                                    <tr>
+                                        <td>
+                                            <button type="button" class="fmt-icono-btn" title="Asignar" @onclick="() => AsignarProfesionalAsync(p)">
+                                                <i class="fa-solid fa-user-plus"></i>
+                                            </button>
+                                        </td>
+                                        <td>@p.NoIdentificacion</td>
+                                        <td>@p.ApellidosYNombres</td>
+                                        <td>@p.Profesion</td>
+                                        <td>@p.Servicio</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+                <p class="fmt-vacio" style="margin:0.75rem 0 0">Profesionales asignados</p>
+                <div class="fmt-tabla-scroll" style="max-height:220px">
+                    <table class="fmt-tabla">
+                        <thead><tr><th>Eliminar</th><th>Documento</th><th>Nombre</th><th>Profesión</th></tr></thead>
+                        <tbody>
+                            @if (profesionalesAsignados.Count == 0)
+                            {
+                                <tr><td colspan="4" class="fmt-vacio">Sin resultados</td></tr>
+                            }
+                            @foreach (var a in profesionalesAsignados)
+                            {
+                                <tr>
+                                    <td>
+                                        <button type="button" class="fmt-icono-btn" title="Eliminar" @onclick="() => EliminarProfesionalAsignadoAsync(a.NoIdentificacion)">
+                                            <i class="fa-solid fa-user-minus"></i>
+                                        </button>
+                                    </td>
+                                    <td>@a.NoIdentificacion</td>
+                                    <td>@a.ApellidosYNombres</td>
+                                    <td>@a.Profesion</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (profesionalesAsignados.Count > 2)
+                {
+                    <div class="fmt-acciones">
+                        <button type="button" class="fmt-btn" disabled="@notificandoFirma" @onclick="NotificarActaAsync">
+                            <i class="fa-solid fa-envelope"></i> @(notificandoFirma ? "Notificando..." : "Notificar")
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@* ---- Modal "Correo" (función agregada al legado el 2026-10-01, JuntaProfesional.aspx.vb) ---- *@
+@if (mostrarModalCorreo && filaCorreo is not null)
+{
+    <div class="fmt-modal-fondo" @onclick="CerrarModalCorreo">
+        <div class="fmt-modal" @onclick:stopPropagation="true" style="max-width:560px">
+            <div class="fmt-modal-encabezado">
+                <h3>Enviar acta por correo</h3>
+                <button type="button" class="fmt-modal-cerrar" @onclick="CerrarModalCorreo">&times;</button>
+            </div>
+            <div class="fmt-modal-cuerpo">
+                <p class="fmt-vacio" style="margin:0">Prescripción @filaCorreo.NoPrescripcion — acta @filaCorreo.NoActa</p>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Destinatario(s) *</label>
+                    <input class="fmt-input" @bind="correoDestino" @bind:event="oninput" placeholder="correo@dominio.com; otro@dominio.com" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Asunto *</label>
+                    <input class="fmt-input" @bind="correoAsunto" @bind:event="oninput" />
+                </div>
+                <div class="fmt-campo">
+                    <label class="fmt-label">Observación *</label>
+                    <textarea class="fmt-input" rows="3" @bind="correoObservacion" @bind:event="oninput"></textarea>
+                </div>
+                @if (mensajeCorreo is not null)
+                {
+                    <p class="fmt-ayuda">@mensajeCorreo</p>
+                }
+                <div class="fmt-acciones" style="margin-top:0">
+                    <button type="button" class="fmt-btn" disabled="@enviandoCorreo" @onclick="EnviarCorreoActaAsync">
+                        <i class="fa-solid fa-paper-plane"></i> @(enviandoCorreo ? "Enviando..." : "Enviar")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string fechaInicio = DateTime.Today.ToString("yyyy-MM-dd");
+    private string fechaFin = DateTime.Today.ToString("yyyy-MM-dd");
+    private string estado = "%";
+    private string regimen = "Contributivo";
+    private string noPrescripcion = "";
+    private string tipoDoc = "%";
+    private string numDoc = "";
+    private bool consultando;
+    private bool exportando;
+
+    private string cia = "";
+    private bool tokenIps;
+
+    private List<JuntaProfesionalDetalle>? resultados;
+
+    // Paginación en memoria (todos los resultados ya están cargados desde ConsultarAsync) —
+    // la grilla completa sin paginar quedaba muy larga para rangos de varios días.
+    private const int TamanioPagina = 25;
+    private int paginaActual = 1;
+    private int TotalPaginas => resultados is null or { Count: 0 } ? 1 : (int)Math.Ceiling(resultados.Count / (double)TamanioPagina);
+    private IEnumerable<JuntaProfesionalDetalle> FilasPagina =>
+        resultados?.Skip((paginaActual - 1) * TamanioPagina).Take(TamanioPagina) ?? [];
+
+    private void IrAPagina(int pagina) => paginaActual = Math.Clamp(pagina, 1, TotalPaginas);
+
+    // ---- Modal "Cargas" ----
+    private bool mostrarModalCargas;
+    private JuntaProfesionalDetalle? filaCargas;
+    private IReadOnlyList<ArchivoCargue> archivosCargue = [];
+    private IReadOnlyList<IBrowserFile> archivosSeleccionados = [];
+    private bool subiendoCargue;
+    private string? mensajeCargue;
+
+    // ---- Modal "Firma" ----
+    private bool mostrarModalFirma;
+    private JuntaProfesionalDetalle? filaFirma;
+    private string firmaDocumento = "";
+    private string firmaNombre = "";
+    private string firmaProfesion = "";
+    private string firmaServicio = "";
+    private bool buscandoFirma;
+    private bool notificandoFirma;
+    private string? mensajeFirma;
+    private IReadOnlyList<ProfesionalEncontrado> profesionalesEncontrados = [];
+    private IReadOnlyList<MiembroJunta> profesionalesAsignados = [];
+
+    // ---- Modal "Correo" ----
+    private bool mostrarModalCorreo;
+    private JuntaProfesionalDetalle? filaCorreo;
+    private string correoDestino = "";
+    private string correoAsunto = "";
+    private string correoObservacion = "";
+    private bool enviandoCorreo;
+    private string? mensajeCorreo;
+
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? EstadoAutenticacion { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        (cia, tokenIps) = await ObtenerUsuarioAsync();
+
+        // Réplica de Page_Load: "If Session("cia") = "ESSC18" Then ddlregimen = Subsidiado".
+        if (cia == "ESSC18")
+        {
+            regimen = "Subsidiado";
+        }
+    }
+
+    private async Task<(string cia, bool tokenIps)> ObtenerUsuarioAsync()
+    {
+        var estadoAuth = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
+        var usuario = estadoAuth?.User;
+        return (usuario?.Cia() ?? "", usuario?.TokenMipres() == "IPS");
+    }
+
+    private async Task ConsultarAsync()
+    {
+        consultando = true;
+        try
+        {
+            var resultado = await JuntasService.ConsultarAsync(
+                cia, regimen, tokenIps,
+                DateTime.Parse(fechaInicio), DateTime.Parse(fechaFin), estado,
+                noPrescripcion, tipoDoc, numDoc);
+
+            resultados = resultado.Filas.ToList();
+            paginaActual = 1;
+        }
+        finally
+        {
+            consultando = false;
+        }
+    }
+
+    private async Task ExportarAsync()
+    {
+        if (resultados is null)
+        {
+            return;
+        }
+
+        exportando = true;
+        try
+        {
+            var tabla = new DataTable();
+            tabla.Columns.Add("NoPrescripcion");
+            tabla.Columns.Add("FPrescripcion");
+            tabla.Columns.Add("TipoTecnologia");
+            tabla.Columns.Add("Consecutivo");
+            tabla.Columns.Add("EstJM");
+            tabla.Columns.Add("CodEntProc");
+            tabla.Columns.Add("Observaciones");
+            tabla.Columns.Add("JustificacionTecnica");
+            tabla.Columns.Add("Modalidad");
+            tabla.Columns.Add("NoActa");
+            tabla.Columns.Add("FechaActa");
+            tabla.Columns.Add("FProceso");
+            tabla.Columns.Add("TipoIDPaciente");
+            tabla.Columns.Add("NroIDPaciente");
+            tabla.Columns.Add("CodEntJM");
+            foreach (var f in resultados)
+            {
+                // La API deja varios campos en null (acta sin asignar, etc.) — DataRow no
+                // acepta null crudo (tira ArgumentNullException), hay que pasar DBNull.Value
+                // explícitamente. Esto es lo que hacía fallar el export en silencio.
+                tabla.Rows.Add(N(f.NoPrescripcion), N(f.FPrescripcion), N(f.TipoTecnologia), N(f.Consecutivo), N(f.EstJM),
+                    N(f.CodEntProc), N(f.Observaciones), N(f.JustificacionTecnica), N(f.Modalidad), N(f.NoActa), N(f.FechaActa),
+                    N(f.FProceso), N(f.TipoIDPaciente), N(f.NroIDPaciente), N(f.CodEntJM));
+            }
+
+            var bytes = Excel.AXlsx(tabla, "Informe");
+            var base64 = Convert.ToBase64String(bytes);
+            await JS.InvokeVoidAsync("ImperiumDescargas.descargar", base64, "JuntaProfesional.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        }
+        finally
+        {
+            exportando = false;
+        }
+    }
+
+    // La API de SISPRO deja varios campos en null cuando el acta aún no existe (p.ej.
+    // EstJM="2", pendiente de evaluación) — Uri.EscapeDataString no acepta null, así que
+    // cada valor se sanea con "?? """ antes de escaparlo (mismo criterio ya usado en
+    // JuntasService para estos mismos campos nulos).
+    private static string Escapar(string? valor) => Uri.EscapeDataString(valor ?? "");
+
+    private static object N(string? valor) => (object?)valor ?? DBNull.Value;
+
+    private static string UrlActa(JuntaProfesionalDetalle f) =>
+        $"/api/juntas/acta?prescripcion={Escapar(f.NoPrescripcion)}";
+
+    private static string TraducirEstado(string codigo) => codigo switch
+    {
+        "1" => "No requiere junta",
+        "2" => "Pendiente evaluación",
+        "3" => "Aprobada",
+        "4" => "No aprobada",
+        _ => codigo,
+    };
+
+    // ---- Modal "Cargas" ----
+
+    private void AbrirModalCargas(JuntaProfesionalDetalle f)
+    {
+        filaCargas = f;
+        archivosSeleccionados = [];
+        mensajeCargue = null;
+        archivosCargue = JuntasArchivoService.Listar(cia, f.NoPrescripcion);
+        mostrarModalCargas = true;
+    }
+
+    private void CerrarModalCargas() => mostrarModalCargas = false;
+
+    private Task OnArchivosCargueSeleccionadosAsync(InputFileChangeEventArgs e)
+    {
+        // AllowMultiple="true" sin límite propio en el legado — se pone un tope razonable
+        // (20 archivos) para esta migración, no era necesario en el `<input>` original
+        // porque ASP.NET WebForms no exige declarar un máximo.
+        archivosSeleccionados = e.GetMultipleFiles(20).ToList();
+        return Task.CompletedTask;
+    }
+
+    private async Task SubirArchivosCargueAsync()
+    {
+        if (filaCargas is null)
+        {
+            return;
+        }
+
+        subiendoCargue = true;
+        try
+        {
+            foreach (var archivo in archivosSeleccionados)
+            {
+                await using var stream = archivo.OpenReadStream(maxAllowedSize: 30 * 1024 * 1024);
+                await JuntasArchivoService.GuardarAsync(cia, filaCargas.NoPrescripcion, archivo.Name, stream);
+
+                // Réplica de FileUploadUsingJQuerySelectionMethod: registra el cargue en
+                // DQS_MIP_JUNTASC por cada archivo guardado — un fallo acá no revierte el
+                // archivo ya guardado en disco, mismo Try/Catch vacío del legado.
+                try
+                {
+                    await JuntasService.RegistrarCargueAsync(cia, filaCargas.NoPrescripcion, filaCargas.TipoTecnologia, filaCargas.Consecutivo);
+                }
+                catch
+                {
+                }
+            }
+
+            mensajeCargue = $"{archivosSeleccionados.Count} archivo(s) cargado(s) correctamente.";
+            archivosSeleccionados = [];
+            archivosCargue = JuntasArchivoService.Listar(cia, filaCargas.NoPrescripcion);
+        }
+        finally
+        {
+            subiendoCargue = false;
+        }
+    }
+
+    private void EliminarArchivoCargue(string nombreArchivo)
+    {
+        if (filaCargas is null)
+        {
+            return;
+        }
+
+        JuntasArchivoService.Eliminar(cia, filaCargas.NoPrescripcion, nombreArchivo);
+        archivosCargue = JuntasArchivoService.Listar(cia, filaCargas.NoPrescripcion);
+    }
+
+    // ---- Modal "Firma" ----
+
+    private void AbrirModalFirma(JuntaProfesionalDetalle f)
+    {
+        filaFirma = f;
+        firmaDocumento = firmaNombre = firmaProfesion = firmaServicio = "";
+        profesionalesEncontrados = [];
+        mensajeFirma = null;
+        mostrarModalFirma = true;
+        _ = CargarAsignadosAsync();
+    }
+
+    private void CerrarModalFirma() => mostrarModalFirma = false;
+
+    private async Task CargarAsignadosAsync()
+    {
+        if (filaFirma is null)
+        {
+            return;
+        }
+
+        profesionalesAsignados = await JuntasFirmaService.ConsultarAsignadosAsync(cia, filaFirma.NoActa ?? "");
+        StateHasChanged();
+    }
+
+    private async Task BuscarProfesionalesAsync()
+    {
+        buscandoFirma = true;
+        try
+        {
+            profesionalesEncontrados = await JuntasFirmaService.BuscarProfesionalesAsync(
+                cia, firmaDocumento, firmaNombre, firmaProfesion, firmaServicio);
+        }
+        finally
+        {
+            buscandoFirma = false;
+        }
+    }
+
+    private async Task AsignarProfesionalAsync(ProfesionalEncontrado p)
+    {
+        if (filaFirma is null)
+        {
+            return;
+        }
+
+        var resultado = await JuntasFirmaService.AsignarAsync(cia, filaFirma.NoActa ?? "", p);
+        mensajeFirma = resultado.Mensaje;
+        await BuscarProfesionalesAsync();
+        await CargarAsignadosAsync();
+    }
+
+    private async Task EliminarProfesionalAsignadoAsync(string documento)
+    {
+        if (filaFirma is null)
+        {
+            return;
+        }
+
+        var resultado = await JuntasFirmaService.EliminarAsync(cia, filaFirma.NoActa ?? "", documento);
+        mensajeFirma = resultado.Mensaje;
+        await CargarAsignadosAsync();
+    }
+
+    private async Task NotificarActaAsync()
+    {
+        if (filaFirma is null)
+        {
+            return;
+        }
+
+        notificandoFirma = true;
+        try
+        {
+            var resultado = await JuntasFirmaService.NotificarAsync(cia, filaFirma.NoActa ?? "");
+            mensajeFirma = resultado.Mensaje;
+        }
+        finally
+        {
+            notificandoFirma = false;
+        }
+    }
+
+    // ---- Modal "Correo" ----
+
+    private void AbrirModalCorreo(JuntaProfesionalDetalle f)
+    {
+        filaCorreo = f;
+        correoDestino = "";
+        correoAsunto = $"Acta de junta profesional {f.NoActa}";
+        correoObservacion = "";
+        mensajeCorreo = null;
+        mostrarModalCorreo = true;
+    }
+
+    private void CerrarModalCorreo() => mostrarModalCorreo = false;
+
+    // Réplica de btnEnviarCorreo_Click: (1) valida destinatarios/asunto/observación antes de
+    // pagar el costo de armar el acta (dos llamadas al web service de MIPRES); (2) genera el
+    // PDF y lo guarda en la MISMA carpeta física que usa "Cargas" — a propósito, sobrescribe
+    // siempre, el acta que se manda es la vigente, no una copia por cada envío — así que
+    // también queda visible en el modal "Cargas" de esa fila; (3) lo envía adjunto.
+    private async Task EnviarCorreoActaAsync()
+    {
+        if (filaCorreo is null)
+        {
+            return;
+        }
+
+        var destinatarios = JuntasFirmaService.ParsearDestinatariosCorreo(correoDestino);
+        if (destinatarios.Count == 0)
+        {
+            mensajeCorreo = "Escriba al menos un correo de destino válido. Para varios, sepárelos con punto y coma.";
+            return;
+        }
+
+        var asunto = correoAsunto.Trim();
+        var observacion = correoObservacion.Trim();
+        if (asunto.Length == 0 || observacion.Length == 0)
+        {
+            mensajeCorreo = "El destinatario, el asunto y la observación son obligatorios.";
+            return;
+        }
+
+        enviandoCorreo = true;
+        try
+        {
+            var nombreArchivo = $"Acta_{SoloLetrasDigitos(filaCorreo.NoPrescripcion)}.pdf";
+            byte[] pdf;
+            try
+            {
+                pdf = await JuntasService.GenerarActaPdfAsync(cia, tokenIps, filaCorreo.NoPrescripcion);
+                await using var stream = new MemoryStream(pdf);
+                await JuntasArchivoService.GuardarAsync(cia, filaCorreo.NoPrescripcion, nombreArchivo, stream);
+            }
+            catch (Exception ex)
+            {
+                mensajeCorreo = $"No fue posible armar el PDF de la junta: {ex.Message}";
+                return;
+            }
+
+            var resultado = await JuntasFirmaService.EnviarActaCorreoAsync(
+                destinatarios, asunto, observacion, filaCorreo.NoPrescripcion, filaCorreo.NoActa ?? "", pdf, nombreArchivo);
+            mensajeCorreo = resultado.Mensaje;
+        }
+        finally
+        {
+            enviandoCorreo = false;
+        }
+    }
+
+    // Réplica de SoloNombreDeArchivo: el número de prescripción viene de una celda del grid,
+    // así que no se usa crudo para armar un nombre de archivo.
+    private static string SoloLetrasDigitos(string valor) =>
+        new(valor.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
+}

@@ -1,0 +1,364 @@
+@page "/formatos/consultar"
+@layout AppLayout
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Contingencia.Application.Auth
+@using Contingencia.Application.Formatos
+@using Contingencia.Web.Services
+@using System.Data
+@inject IFormatosService FormatosService
+@inject IExcelExportService Excel
+@inject IJSRuntime JS
+
+@* Equivalente a JuntasFormatoCntCO.aspx ("Consultar formato"). sp_MIP_ConsultaFormatosCNT
+   solo recibe 7 parámetros reales (CIA,TIPO,ID,NIT,RADICADO,FECHA,USUARIO) — "Fecha Fin" y
+   "Estado" (confirmados por lectura de OBJECT_DEFINITION como no usados por el SP) se
+   aplican como filtro EN MEMORIA sobre lo que ya trajo el SP, no como parámetro de la
+   consulta — la BLL legada (fuente no disponible) casi seguro hacía lo mismo, dado que en
+   la UI real sí filtran. El resto de la lógica (validación, sustitución de vacíos por "%",
+   exportación a Excel, rama de rol 601 vs. otros roles) se documenta en BASE_DE_DATOS.md. *@
+
+<PageTitle>Consultar formato de contingencia</PageTitle>
+
+<div class="fmt-header">
+    <h1><i class="fa-solid fa-magnifying-glass"></i> Consultar formato de contingencia</h1>
+    <p>Ingrese al menos un criterio de búsqueda para ver sus formatos cargados.</p>
+</div>
+
+<div class="fmt-card">
+    <div class="fmt-row">
+        <div class="fmt-campo">
+            <label class="fmt-label">Tipo de documento</label>
+            <select class="fmt-select" @bind="tipoDocumento">
+                <option value="Ninguno">Ninguno</option>
+                <option value="AS">Adulto sin Identificación</option>
+                <option value="CD">Carné diplomático</option>
+                <option value="CC">Cédula de ciudadanía</option>
+                <option value="CE">Cédula de extranjería</option>
+                <option value="NV">Certificado de nacido vivo</option>
+                <option value="MS">Menor sin Identificación</option>
+                <option value="NI">NIT</option>
+                <option value="PA">Pasaporte</option>
+                <option value="PR">Pasaporte de la ONU</option>
+                <option value="PE">Permiso Especial de Permanencia</option>
+                <option value="PT">Permiso de Protección Temporal</option>
+                <option value="RC">Registro civil</option>
+                <option value="SC">Salvo conducto de permanencia</option>
+                <option value="TI">Tarjeta de identidad</option>
+            </select>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">No documento</label>
+            <input type="text" class="fmt-input" @bind="numeroDocumento" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo fmt-campo-ancho">
+            <label class="fmt-label">Código de Habilitación - Prestador</label>
+            <input class="fmt-input" list="dl-prestador" value="@prestadorTexto" @oninput="OnPrestadorInputAsync" placeholder="Ingresar" />
+            <datalist id="dl-prestador">@foreach (var o in opcionesPrestador) { <option value="@($"{o.Codigo}|{o.Nombre}")"></option> }</datalist>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">No Radicado</label>
+            <input type="text" class="fmt-input" @bind="radicado" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Fecha Inicio</label>
+            <input type="date" class="fmt-input" value="@fechaInicio" @onchange="e => fechaInicio = e.Value?.ToString() ?? string.Empty" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Fecha Fin</label>
+            <input type="date" class="fmt-input" value="@fechaFin" @onchange="e => fechaFin = e.Value?.ToString() ?? string.Empty" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label">Estado</label>
+            <select class="fmt-select" @bind="estado">
+                <option>Todo</option>
+                <option>Devuelto</option>
+                <option>Gestionado</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="fmt-acciones">
+        <button type="button" class="fmt-btn" disabled="@consultando" @onclick="ConsultarAsync">
+            <i class="fa-solid fa-magnifying-glass"></i> @(consultando ? "Consultando..." : "Consultar")
+        </button>
+        <button type="button" class="fmt-btn-secundario" disabled="@exportando" @onclick="ExportarAsync">
+            <i class="fa-solid fa-file-excel"></i> @(exportando ? "Exportando..." : "Exportar a Excel")
+        </button>
+    </div>
+    <p class="fmt-ayuda">Descarga directa a excel</p>
+</div>
+
+@if (resultados is not null)
+{
+    <div class="fmt-card" style="margin-top:1.25rem">
+        @if (resultados.Count == 0)
+        {
+            <p class="fmt-vacio">No se encontraron formatos con los criterios ingresados.</p>
+        }
+        else
+        {
+            <div class="fmt-tabla-scroll">
+                <table class="fmt-tabla">
+                    <thead>
+                        <tr>
+                            <th>Ver</th>
+                            @if (puedeGestionar)
+                            {
+                                <th>Gestión</th>
+                            }
+                            <th>Radicado</th>
+                            <th>Fecha</th>
+                            <th>Tipo Id</th>
+                            <th>No Id</th>
+                            <th>Cód Hab-Prestador</th>
+                            <th>Observación</th>
+                            <th>Fecha formato</th>
+                            <th>No Prescripción</th>
+                            <th>Observaciones gestión</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var f in resultados)
+                        {
+                            <tr>
+                                <td>
+                                    <a href="@UrlArchivo(f)" target="_blank" title="Ver formato">
+                                        <i class="fa-solid fa-file-arrow-down"></i>
+                                    </a>
+                                </td>
+                                @if (puedeGestionar)
+                                {
+                                    <td>
+                                        <button type="button" class="fmt-icono-btn" title="Gestionar" @onclick="() => AbrirGestion(f)">
+                                            <i class="fa-solid fa-pen"></i>
+                                        </button>
+                                    </td>
+                                }
+                                <td>@f.Radicado</td>
+                                <td>@f.Fecha</td>
+                                <td>@f.TipoId</td>
+                                <td>@f.NumId</td>
+                                <td>@f.Nit</td>
+                                <td>@f.Obj</td>
+                                <td>@f.FechaFormato</td>
+                                <td>@f.NoPrescripcion</td>
+                                <td>@f.Observaciones</td>
+                                <td><span class="fmt-estado">@f.Estado</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@if (formatoGestion is not null)
+{
+    <div class="fmt-modal-fondo" @onclick="CerrarGestion">
+        <div class="fmt-modal" @onclick:stopPropagation="true">
+            <div class="fmt-modal-encabezado">
+                <h3>Gestionar formato</h3>
+                <button type="button" class="fmt-modal-cerrar" @onclick="CerrarGestion">&times;</button>
+            </div>
+            <div class="fmt-modal-cuerpo">
+                <div class="fmt-campo fmt-campo-ancho">
+                    <label class="fmt-label">No Prescripción</label>
+                    <input type="text" class="fmt-input" @bind="gestionMipres" @bind:event="oninput" />
+                </div>
+                <div class="fmt-campo fmt-campo-ancho">
+                    <label class="fmt-label">Observaciones</label>
+                    <input type="text" class="fmt-input" @bind="gestionObservaciones" @bind:event="oninput" />
+                </div>
+                <div class="fmt-campo fmt-campo-ancho">
+                    <label class="fmt-label">Estado</label>
+                    <select class="fmt-select" @bind="gestionEstado">
+                        <option>Seleccionar</option>
+                        <option>Devuelto</option>
+                        <option>Gestionado</option>
+                    </select>
+                </div>
+            </div>
+            <div class="fmt-modal-acciones">
+                <button type="button" class="fmt-btn" disabled="@guardandoGestion" @onclick="GuardarGestionAsync">
+                    <i class="fa-solid fa-check"></i> @(guardandoGestion ? "Guardando..." : "Guardar")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string tipoDocumento = "Ninguno";
+    private string numeroDocumento = "";
+    private string prestadorTexto = "";
+    private string radicado = "";
+    private string fechaInicio = "";
+    private string fechaFin = "";
+    private string estado = "Todo";
+    private bool consultando;
+    private bool exportando;
+
+    private IReadOnlyList<PrestadorHabilitacion> opcionesPrestador = [];
+    private List<FormatoConsultado>? resultados;
+    private bool puedeGestionar;
+
+    // Estado del modal "Gestionar formato" (equivalente a JuntasFormatoCntCO2.aspx, migrado
+    // de una página aparte a un modal en la misma pantalla — solo visible/usable para los
+    // roles 27/29/30, ver ClaimsPrincipalExtensions.PuedeGestionarFormatos).
+    private FormatoConsultado? formatoGestion;
+    private string gestionMipres = "";
+    private string gestionObservaciones = "";
+    private string gestionEstado = "Seleccionar";
+    private bool guardandoGestion;
+
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? EstadoAutenticacion { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var estado = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
+        puedeGestionar = estado?.User.PuedeGestionarFormatos() ?? false;
+    }
+
+    private async Task OnPrestadorInputAsync(ChangeEventArgs e)
+    {
+        prestadorTexto = e.Value?.ToString() ?? "";
+        opcionesPrestador = await FormatosService.BuscarPrestadoresAsync(prestadorTexto);
+    }
+
+    private void AbrirGestion(FormatoConsultado f)
+    {
+        formatoGestion = f;
+        gestionMipres = f.NoPrescripcion;
+        gestionObservaciones = f.Observaciones;
+        gestionEstado = f.Estado is "Devuelto" or "Gestionado" ? f.Estado : "Seleccionar";
+    }
+
+    private void CerrarGestion()
+    {
+        formatoGestion = null;
+    }
+
+    private async Task GuardarGestionAsync()
+    {
+        if (formatoGestion is null)
+        {
+            return;
+        }
+
+        guardandoGestion = true;
+        try
+        {
+            var (cia, usuApp) = await ObtenerUsuarioAsync();
+            var resultado = await FormatosService.GestionarAsync(
+                cia, usuApp, formatoGestion.Radicado, gestionMipres, gestionObservaciones, gestionEstado);
+
+            await JS.InvokeVoidAsync("Tran", resultado.Mensaje, "");
+
+            if (resultado.Exito)
+            {
+                CerrarGestion();
+                // Refresca la tabla con la misma búsqueda ya aplicada, para ver el cambio.
+                var refresco = await FormatosService.ConsultarAsync(
+                    cia, usuApp, tipoDocumento, numeroDocumento, prestadorTexto, radicado,
+                    fechaInicio, fechaFin, estado);
+                if (refresco.Exito)
+                {
+                    resultados = refresco.Formatos.ToList();
+                }
+            }
+        }
+        finally
+        {
+            guardandoGestion = false;
+        }
+    }
+
+    private string UrlArchivo(FormatoConsultado f)
+    {
+        var extension = Path.GetExtension(f.Ruta);
+        return $"/api/formatos/archivo?radicado={Uri.EscapeDataString(f.Radicado)}&extension={Uri.EscapeDataString(extension)}";
+    }
+
+    private async Task<(string cia, string usuApp)> ObtenerUsuarioAsync()
+    {
+        var estado = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
+        var usuario = estado?.User;
+        return (usuario?.Cia() ?? "", usuario?.UsuApp() ?? "");
+    }
+
+    private async Task ConsultarAsync()
+    {
+        consultando = true;
+        try
+        {
+            var (cia, usuApp) = await ObtenerUsuarioAsync();
+            var resultado = await FormatosService.ConsultarAsync(
+                cia, usuApp, tipoDocumento, numeroDocumento, prestadorTexto, radicado,
+                fechaInicio, fechaFin, estado);
+
+            if (!resultado.Exito)
+            {
+                resultados = null;
+                await JS.InvokeVoidAsync("Tran", resultado.Mensaje, "");
+                return;
+            }
+
+            resultados = resultado.Formatos.ToList();
+        }
+        finally
+        {
+            consultando = false;
+        }
+    }
+
+    private async Task ExportarAsync()
+    {
+        exportando = true;
+        try
+        {
+            var (cia, usuApp) = await ObtenerUsuarioAsync();
+            var resultado = await FormatosService.ConsultarAsync(
+                cia, usuApp, tipoDocumento, numeroDocumento, prestadorTexto, radicado,
+                fechaInicio, fechaFin, estado);
+
+            if (!resultado.Exito)
+            {
+                await JS.InvokeVoidAsync("Tran", resultado.Mensaje, "");
+                return;
+            }
+
+            resultados = resultado.Formatos.ToList();
+
+            // Réplica de dt.Columns.RemoveAt(12) en imgexporta_Click: en la rama de rol 601
+            // la columna en esa posición es ESTADO — se excluye igual que en el legado.
+            var tabla = new DataTable();
+            tabla.Columns.Add("Radicado");
+            tabla.Columns.Add("Fecha");
+            tabla.Columns.Add("TipoId");
+            tabla.Columns.Add("NoId");
+            tabla.Columns.Add("CodHabPrestador");
+            tabla.Columns.Add("Observacion");
+            tabla.Columns.Add("FechaFormato");
+            tabla.Columns.Add("NoPrescripcion");
+            tabla.Columns.Add("ObservacionesGestion");
+            foreach (var f in resultados)
+            {
+                tabla.Rows.Add(f.Radicado, f.Fecha, f.TipoId, f.NumId, f.Nit, f.Obj, f.FechaFormato, f.NoPrescripcion, f.Observaciones);
+            }
+
+            var bytes = Excel.AXlsx(tabla, "Informe");
+            var base64 = Convert.ToBase64String(bytes);
+            await JS.InvokeVoidAsync("ImperiumDescargas.descargar", base64, "InformeFormatos.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        }
+        finally
+        {
+            exportando = false;
+        }
+    }
+}
