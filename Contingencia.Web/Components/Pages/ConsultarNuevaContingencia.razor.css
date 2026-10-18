@@ -6,3 +6,39 @@
     background: #fff;
     padding: 0.25rem;
 }
+
+/* Panel de filtros reorganizado en una grilla de 4 columnas (en vez del flex-wrap genérico
+   de .fmt-row, que dejaba campos de ancho irregular y saltos de línea desordenados). Con
+   8 campos en total se llenan exactamente 2 filas de 4, sin espacio sobrante a la derecha. */
+.cnc-filtros {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.1rem;
+}
+
+@media (max-width: 900px) {
+    .cnc-filtros {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 560px) {
+    .cnc-filtros {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Icono identificador junto al nombre de cada campo: color de acento sutil, alineado
+   con el texto del label, sin interferir con el tamaño/peso tipográfico existente. */
+.cnc-filtros .fmt-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.cnc-icono {
+    color: #2f6fed;
+    font-size: 0.85em;
+    width: 1em;
+    text-align: center;
+}

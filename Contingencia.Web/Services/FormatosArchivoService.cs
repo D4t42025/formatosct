@@ -10,16 +10,31 @@ public class FormatosArchivoService(IWebHostEnvironment entorno, IConfiguration 
 {
     private readonly string _directorioBase = Path.Combine(RutaAlmacenamiento.Base(configuracion, entorno.ContentRootPath), "mediauploader", "formatos");
 
-    public string RutaFisica(string cia, string radicado, string extension) =>
-        Path.Combine(_directorioBase, cia, radicado + extension);
+    private string RutaFisica(string cia, string radicado, string extension) =>
+        Path.Combine(_directorioBase, Path.GetFileName(cia), Path.GetFileName(radicado) + Path.GetFileName(extension));
 
-    public async Task GuardarAsync(string rutaFisica, Stream contenido)
+    public async Task GuardarAsync(string cia, string radicado, string extension, Stream contenido)
     {
-        var directorio = Path.GetDirectoryName(rutaFisica)!;
-        Directory.CreateDirectory(directorio);
+        var rutaFisica = RutaFisica(cia, radicado, extension);
+        Directory.CreateDirectory(Path.GetDirectoryName(rutaFisica)!);
         await using var destino = File.Create(rutaFisica);
         await contenido.CopyToAsync(destino);
     }
 
-    public bool Existe(string rutaFisica) => File.Exists(rutaFisica);
+    public Task<Stream?> AbrirAsync(string cia, string radicado, string extension)
+    {
+        var rutaFisica = RutaFisica(cia, radicado, extension);
+        Stream? contenido = File.Exists(rutaFisica) ? File.OpenRead(rutaFisica) : null;
+        return Task.FromResult(contenido);
+    }
+
+    public bool Eliminar(string cia, string radicado, string extension)
+    {
+        var rutaFisica = RutaFisica(cia, radicado, extension);
+        if (!File.Exists(rutaFisica)) return false;
+        File.Delete(rutaFisica);
+        return true;
+    }
+
+    public bool Existe(string cia, string radicado, string extension) => File.Exists(RutaFisica(cia, radicado, extension));
 }

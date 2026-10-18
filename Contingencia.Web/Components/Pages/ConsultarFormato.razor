@@ -8,6 +8,7 @@
 @using Contingencia.Web.Services
 @using System.Data
 @inject IFormatosService FormatosService
+@inject IFormatosArchivoService ArchivoService
 @inject IExcelExportService Excel
 @inject IJSRuntime JS
 
@@ -108,6 +109,10 @@
                             {
                                 <th>Gestión</th>
                             }
+                            @if (puedeEliminar)
+                            {
+                                <th>Eliminar</th>
+                            }
                             <th>Radicado</th>
                             <th>Fecha</th>
                             <th>Tipo Id</th>
@@ -125,15 +130,26 @@
                         {
                             <tr>
                                 <td>
-                                    <a href="@UrlArchivo(f)" target="_blank" title="Ver formato">
-                                        <i class="fa-solid fa-file-arrow-down"></i>
-                                    </a>
+                                    @if (!radicadosSinArchivo.Contains(f.Radicado))
+                                    {
+                                        <a href="@UrlArchivo(f)" target="_blank" title="Ver formato">
+                                            <i class="fa-solid fa-file-arrow-down"></i>
+                                        </a>
+                                    }
                                 </td>
                                 @if (puedeGestionar)
                                 {
                                     <td>
                                         <button type="button" class="fmt-icono-btn" title="Gestionar" @onclick="() => AbrirGestion(f)">
                                             <i class="fa-solid fa-pen"></i>
+                                        </button>
+                                    </td>
+                                }
+                                @if (puedeEliminar)
+                                {
+                                    <td>
+                                        <button type="button" class="fmt-icono-btn" title="Eliminar formato (archivo + registro)" disabled="@(eliminandoRadicado == f.Radicado)" @onclick="() => EliminarFormatoAsync(f)">
+                                            <i class="fa-solid fa-trash"></i>
                                         </button>
                                     </td>
                                 }
@@ -205,6 +221,13 @@
     private IReadOnlyList<PrestadorHabilitacion> opcionesPrestador = [];
     private List<FormatoConsultado>? resultados;
     private bool puedeGestionar;
+    private bool puedeEliminar;
+
+    // Radicados cuyo archivo ya fue eliminado en esta misma sesión de consulta (de disco o
+    // de Azure Blob Storage según la CIA, ver IFormatosArchivoService/FormatosArchivoServiceSelector)
+    // — oculta "Ver"/"Eliminar" para esa fila sin tener que repetir la consulta a BD.
+    private readonly HashSet<string> radicadosSinArchivo = [];
+    private string? eliminandoRadicado;
 
     // Estado del modal "Gestionar formato" (equivalente a JuntasFormatoCntCO2.aspx, migrado
     // de una página aparte a un modal en la misma pantalla — solo visible/usable para los
@@ -222,6 +245,7 @@
     {
         var estado = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
         puedeGestionar = estado?.User.PuedeGestionarFormatos() ?? false;
+        puedeEliminar = estado?.User.PuedeEliminarComoImperium() ?? false;
     }
 
     private async Task OnPrestadorInputAsync(ChangeEventArgs e)
@@ -282,6 +306,49 @@
     {
         var extension = Path.GetExtension(f.Ruta);
         return $"/api/formatos/archivo?radicado={Uri.EscapeDataString(f.Radicado)}&extension={Uri.EscapeDataString(extension)}";
+    }
+
+    // Elimina COMPLETAMENTE un formato: el archivo adjunto (de Azure Blob Storage —
+    // contenedor "formatosct" — si la CIA del usuario está en la lista dinámica
+    // Almacenamiento:Azure:CiasFormatosAzure, o de mediauploader en disco para el resto; el
+    // enrutado lo decide FormatosArchivoServiceSelector sin que esta pantalla lo sepa) Y el
+    // registro de DQS_MIP_FORMATOS (sp_MIP_EliminaFormatoCnt). Restringido a la cuenta
+    // interna "Imperium" (ver puedeEliminar/PuedeEliminarComoImperium) — pedido explícito
+    // del usuario para que el borrado no quede disponible a cualquier rol de gestión.
+    // Se borra el archivo primero (best-effort, puede no existir) y siempre se intenta
+    // borrar el registro de BD después, para no dejar filas huérfanas.
+    private async Task EliminarFormatoAsync(FormatoConsultado f)
+    {
+        var confirmado = await JS.InvokeAsync<bool>(
+            "confirm", $"¿Eliminar el formato del radicado {f.Radicado}? Esta acción borra el archivo y el registro, y no se puede deshacer.");
+        if (!confirmado)
+        {
+            return;
+        }
+
+        eliminandoRadicado = f.Radicado;
+        try
+        {
+            var (cia, _) = await ObtenerUsuarioAsync();
+            var extension = Path.GetExtension(f.Ruta);
+            if (!radicadosSinArchivo.Contains(f.Radicado))
+            {
+                ArchivoService.Eliminar(cia, f.Radicado, extension);
+            }
+
+            var resultado = await FormatosService.EliminarAsync(cia, f.Radicado);
+            await JS.InvokeVoidAsync("Tran", resultado.Mensaje, "");
+
+            if (resultado.Exito)
+            {
+                resultados?.Remove(f);
+                radicadosSinArchivo.Remove(f.Radicado);
+            }
+        }
+        finally
+        {
+            eliminandoRadicado = null;
+        }
     }
 
     private async Task<(string cia, string usuApp)> ObtenerUsuarioAsync()

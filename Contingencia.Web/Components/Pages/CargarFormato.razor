@@ -140,10 +140,9 @@
 
             // Réplica de file.SaveAs(...) en el legado — el radicado recién devuelto por el
             // SP es el nombre de archivo, no el nombre original que subió el usuario.
-            var ruta = ArchivoService.RutaFisica(cia, resultado.Radicado!, extension);
             await using (var stream = archivo!.OpenReadStream(maxAllowedSize: 30 * 1024 * 1024))
             {
-                await ArchivoService.GuardarAsync(ruta, stream);
+                await ArchivoService.GuardarAsync(cia, resultado.Radicado!, extension, stream);
             }
 
             await JS.InvokeVoidAsync("TranT", "Formato Cargado", $"Radicado: {resultado.Radicado}", "/inicio");

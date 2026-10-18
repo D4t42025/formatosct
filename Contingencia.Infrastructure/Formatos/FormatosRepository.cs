@@ -63,4 +63,10 @@ public class FormatosRepository(IStoredProcedureExecutor executor) : IFormatosRe
             ("@Cia", cia), ("@Radicado", radicado));
         return dt.Rows.Count > 0 ? Convert.ToString(dt.Rows[0]["EMAIL"]) : null;
     }
+
+    public async Task<bool> EliminarAsync(string cia, string radicado)
+    {
+        var dt = await executor.RecuperarDataTableAsync("sp_MIP_EliminaFormatoCnt", cia, radicado);
+        return dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["RESULTADO"]) == 1;
+    }
 }

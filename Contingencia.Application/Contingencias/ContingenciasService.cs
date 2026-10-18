@@ -113,6 +113,14 @@ public class ContingenciasService(IContingenciasRepository repository) : IContin
         return new ResultadoConsultaContingencias(true, null, filas);
     }
 
+    public async Task<ResultadoRegistrarContingencia> EliminarAsync(string cia, string radicado)
+    {
+        var eliminado = await repository.EliminarAsync(cia, radicado);
+        return eliminado
+            ? new ResultadoRegistrarContingencia(true, "Contingencia eliminada.", radicado)
+            : new ResultadoRegistrarContingencia(false, "No se encontró la contingencia para eliminar.", radicado);
+    }
+
     private static TecnologiaContingencia MapearTecnologia(DataRow f) => new(
         Texto(f, "TIPOTECNOLOGIA"),
         TextoNulo(f, "TEC_NOMBRE"), TextoNulo(f, "TEC_CODIGO"), TextoNulo(f, "TEC_PRINCIPIOACTIVO"), TextoNulo(f, "TEC_FORMAFARMACEUTICA"), TextoNulo(f, "TEC_VIAADMINISTRACION"), TextoNulo(f, "TEC_DOSIS"),

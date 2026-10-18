@@ -228,4 +228,12 @@ public class FormatosService(
 
         return new ResultadoGestionFormato(true, "Confirmación correcta");
     }
+
+    public async Task<ResultadoGestionFormato> EliminarAsync(string cia, string radicado)
+    {
+        var eliminado = await repository.EliminarAsync(cia, radicado);
+        return eliminado
+            ? new ResultadoGestionFormato(true, "Formato eliminado.")
+            : new ResultadoGestionFormato(false, "No se encontró el formato para eliminar.");
+    }
 }

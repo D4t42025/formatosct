@@ -53,4 +53,10 @@ public class ContingenciasRepository(IStoredProcedureExecutor executor) : IConti
 
     public Task<DataTable> ConsultarTecnologiasAsync(string cia, string radicadosJson) =>
         executor.RecuperarDataTableAsync("sp_MIP_ConsultaContingenciaTecnologias", cia, radicadosJson);
+
+    public async Task<bool> EliminarAsync(string cia, string radicado)
+    {
+        var dt = await executor.RecuperarDataTableAsync("sp_MIP_EliminaContingencia", cia, radicado);
+        return dt.Rows.Count > 0 && Convert.ToInt32(dt.Rows[0]["RESULTADO"]) == 1;
+    }
 }

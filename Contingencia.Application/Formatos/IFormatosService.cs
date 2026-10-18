@@ -66,4 +66,10 @@ public interface IFormatosService
     // método asume que ya se validó eso.
     Task<ResultadoGestionFormato> GestionarAsync(
         string cia, string usuario, string radicado, string mipres, string observaciones, string estado);
+
+    // Borra el registro de DQS_MIP_FORMATOS. Restringido en el llamador (Razor) a la cuenta
+    // "Imperium" vía ClaimsPrincipalExtensions.PuedeEliminarComoImperium — este método no
+    // valida permisos, asume que ya se hizo. No borra el archivo adjunto (lo hace el
+    // llamador, vía IFormatosArchivoService, antes de llamar esto).
+    Task<ResultadoGestionFormato> EliminarAsync(string cia, string radicado);
 }

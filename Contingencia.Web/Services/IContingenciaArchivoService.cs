@@ -14,4 +14,7 @@ public interface IContingenciaArchivoService
     Task GuardarAsync(string rutaRelativa, Stream contenido);
     Task GuardarBase64PngAsync(string rutaRelativa, string imagenBase64Png);
     bool Existe(string rutaRelativa);
+
+    // Borrado físico de un soporte/firma puntual (disco) — ver implementación.
+    bool Eliminar(string rutaRelativa);
 }

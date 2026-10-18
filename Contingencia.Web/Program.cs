@@ -95,7 +95,12 @@ builder.Services.AddScoped<IFiltrosRepository, FiltrosRepository>();
 builder.Services.AddHttpClient<IMipresPrescripcionValidator, MipresPrescripcionValidator>();
 builder.Services.AddScoped<IFormatosService, FormatosService>();
 builder.Services.AddScoped<ISugerenciasService, SugerenciasService>();
-builder.Services.AddScoped<IFormatosArchivoService, FormatosArchivoService>();
+builder.Services.AddScoped<FormatosArchivoService>();
+// Enrutado dinámico por CIA (ver FormatosArchivoServiceSelector): solo CIA 890330031
+// (Sanitas) guarda/visualiza/elimina sus formatos en Azure Blob Storage (contenedor
+// "formatosct", misma cuenta que Juntas); el resto sigue en mediauploader sin cambios.
+builder.Services.AddScoped<FormatosArchivoServiceAzure>();
+builder.Services.AddScoped<IFormatosArchivoService, FormatosArchivoServiceSelector>();
 builder.Services.AddScoped<IExcelExportService, ExcelExportService>();
 builder.Services.AddScoped<IJuntasRepository, JuntasRepository>();
 builder.Services.AddScoped<IActaPdfBuilder, ActaPdfBuilder>();
@@ -241,8 +246,8 @@ app.MapGet("/api/formatos/archivo", async (HttpContext context, string radicado,
         return Results.NotFound();
     }
 
-    var ruta = archivoService.RutaFisica(cia, rad, ext);
-    if (!archivoService.Existe(ruta)) return Results.NotFound();
+    var contenido = await archivoService.AbrirAsync(cia, rad, ext);
+    if (contenido is null) return Results.NotFound();
 
     // Sin content-type explícito, Results.File cae a application/octet-stream y el
     // navegador lo descarga como blob genérico sin extensión ("archivo") en vez de abrirlo
@@ -261,7 +266,7 @@ app.MapGet("/api/formatos/archivo", async (HttpContext context, string radicado,
         _ => "application/octet-stream",
     };
 
-    return Results.File(ruta, contentType);
+    return Results.File(contenido, contentType);
 }).RequireAuthorization();
 
 app.MapGet("/api/contingencias/formulario", async (HttpContext context, string radicado,

@@ -33,4 +33,10 @@ public interface IContingenciasRepository
     // Tecnologías (una fila por tecnología, ordenadas por radicado y ORDEN) de los radicados
     // indicados, que viajan como arreglo JSON.
     Task<DataTable> ConsultarTecnologiasAsync(string cia, string radicadosJson);
+
+    // sp_MIP_EliminaContingencia (ver Sql/015_MipEliminaContingencia.sql) — borra en
+    // transacción DQS_MIP_CONTINGENCIAS_TEC y DQS_MIP_CONTINGENCIAS. No borra los archivos
+    // de soportes/firma (eso lo hace el llamador vía IContingenciaArchivoService, antes de
+    // llamar esto, ya que ahí sí conoce las rutas relativas).
+    Task<bool> EliminarAsync(string cia, string radicado);
 }

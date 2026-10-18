@@ -12,6 +12,7 @@
 @inject IContingenciasService ContingenciasService
 @inject IParametricasService ParametricasService
 @inject IFormatosService FormatosService
+@inject IContingenciaArchivoService ArchivoService
 @inject IExcelExportService Excel
 @inject IJSRuntime JS
 
@@ -28,13 +29,13 @@
 </div>
 
 <div class="fmt-card">
-    <div class="fmt-row">
+    <div class="fmt-row cnc-filtros">
         <div class="fmt-campo">
-            <label class="fmt-label">No Radicado</label>
+            <label class="fmt-label"><i class="fa-solid fa-hashtag cnc-icono"></i> No Radicado</label>
             <input type="text" class="fmt-input" @bind="radicado" @bind:event="oninput" />
         </div>
         <div class="fmt-campo">
-            <label class="fmt-label">Causal</label>
+            <label class="fmt-label"><i class="fa-solid fa-circle-exclamation cnc-icono"></i> Causal</label>
             <select class="fmt-select" @bind="causal">
                 <option value="">Todo</option>
                 @foreach (var c in parametricas["CAUSAL"])
@@ -43,21 +44,8 @@
                 }
             </select>
         </div>
-        <div class="fmt-campo fmt-campo-ancho">
-            <label class="fmt-label">Código de Habilitación - IPS</label>
-            <input class="fmt-input" list="dl-ips" value="@ipsTexto" @oninput="OnIpsInputAsync" placeholder="Ingresar" />
-            <datalist id="dl-ips">@foreach (var o in opcionesIps) { <option value="@o.Codigo">@o.Nombre</option> }</datalist>
-        </div>
         <div class="fmt-campo">
-            <label class="fmt-label">Documento profesional</label>
-            <input type="text" class="fmt-input" @bind="profesionalDocumento" @bind:event="oninput" />
-        </div>
-        <div class="fmt-campo">
-            <label class="fmt-label">Documento paciente</label>
-            <input type="text" class="fmt-input" @bind="pacienteNumDoc" @bind:event="oninput" />
-        </div>
-        <div class="fmt-campo">
-            <label class="fmt-label">Tipo de tecnología</label>
+            <label class="fmt-label"><i class="fa-solid fa-pills cnc-icono"></i> Tipo de tecnología</label>
             <select class="fmt-select" @bind="tipoTecnologia">
                 <option value="">Todo</option>
                 <option value="Medicamento">Medicamento</option>
@@ -68,11 +56,24 @@
             </select>
         </div>
         <div class="fmt-campo">
-            <label class="fmt-label">Fecha Inicio</label>
+            <label class="fmt-label"><i class="fa-solid fa-hospital cnc-icono"></i> Código de Habilitación - IPS</label>
+            <input class="fmt-input" list="dl-ips" value="@ipsTexto" @oninput="OnIpsInputAsync" placeholder="Ingresar" />
+            <datalist id="dl-ips">@foreach (var o in opcionesIps) { <option value="@o.Codigo">@o.Nombre</option> }</datalist>
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label"><i class="fa-solid fa-user-doctor cnc-icono"></i> Documento profesional</label>
+            <input type="text" class="fmt-input" @bind="profesionalDocumento" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label"><i class="fa-solid fa-id-card cnc-icono"></i> Documento paciente</label>
+            <input type="text" class="fmt-input" @bind="pacienteNumDoc" @bind:event="oninput" />
+        </div>
+        <div class="fmt-campo">
+            <label class="fmt-label"><i class="fa-solid fa-calendar-day cnc-icono"></i> Fecha Inicio</label>
             <input type="date" class="fmt-input" value="@fechaInicio" @onchange="e => fechaInicio = e.Value?.ToString() ?? string.Empty" />
         </div>
         <div class="fmt-campo">
-            <label class="fmt-label">Fecha Fin</label>
+            <label class="fmt-label"><i class="fa-solid fa-calendar-check cnc-icono"></i> Fecha Fin</label>
             <input type="date" class="fmt-input" value="@fechaFin" @onchange="e => fechaFin = e.Value?.ToString() ?? string.Empty" />
         </div>
     </div>
@@ -101,6 +102,10 @@
                     <thead>
                         <tr>
                             <th>Ver</th>
+                            @if (puedeEliminar)
+                            {
+                                <th>Eliminar</th>
+                            }
                             <th>Radicado</th>
                             <th>Fecha</th>
                             <th>Causal</th>
@@ -125,6 +130,14 @@
                                         <i class="fa-solid fa-file-pdf"></i>
                                     </a>
                                 </td>
+                                @if (puedeEliminar)
+                                {
+                                    <td>
+                                        <button type="button" class="fmt-icono-btn" title="Eliminar contingencia (archivos + registro)" disabled="@(eliminandoRadicado == c.Radicado)" @onclick="() => EliminarContingenciaAsync(c)">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    </td>
+                                }
                                 <td>@c.Radicado</td>
                                 <td>@c.FechaCreacion.ToString("yyyy-MM-dd HH:mm")</td>
                                 <td>@(c.CausalNombre ?? c.Causal)</td>
@@ -221,8 +234,8 @@
     private string profesionalDocumento = "";
     private string pacienteNumDoc = "";
     private string tipoTecnologia = "";
-    private string fechaInicio = "";
-    private string fechaFin = "";
+    private string fechaInicio = PrimerDiaMesActual();
+    private string fechaFin = UltimoDiaMesActual();
     private bool consultando;
     private bool exportando;
 
@@ -231,6 +244,8 @@
     private List<ContingenciaConsultada>? resultados;
     private ContingenciaConsultada? detalle;
     private List<string> rutasSoportesDetalle = [];
+    private bool puedeEliminar;
+    private string? eliminandoRadicado;
 
     [CascadingParameter]
     private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? EstadoAutenticacion { get; set; }
@@ -238,6 +253,8 @@
     protected override async Task OnInitializedAsync()
     {
         parametricas = await ParametricasService.CargarAsync();
+        var estado = EstadoAutenticacion is not null ? await EstadoAutenticacion : null;
+        puedeEliminar = estado?.User.PuedeEliminarComoImperium() ?? false;
     }
 
     private async Task<string> ObtenerCiaAsync()
@@ -289,6 +306,56 @@
     private static string UrlArchivo(string radicado, string rutaRelativa) =>
         $"/api/contingencias/archivo?radicado={Uri.EscapeDataString(radicado)}&ruta={Uri.EscapeDataString(rutaRelativa)}";
 
+    // Elimina COMPLETAMENTE una contingencia: primero los archivos físicos (soportes +
+    // firma, 100% disco vía IContingenciaArchivoService — no hay enrutado a Azure acá, ver
+    // MIGRACION-AZURE-JUNTAS.md sección 30) y luego los registros de
+    // DQS_MIP_CONTINGENCIAS/_TEC (sp_MIP_EliminaContingencia). Restringido a la cuenta
+    // interna "Imperium" (puedeEliminar/PuedeEliminarComoImperium), mismo criterio que
+    // ConsultarFormato.razor.
+    private async Task EliminarContingenciaAsync(ContingenciaConsultada c)
+    {
+        var confirmado = await JS.InvokeAsync<bool>(
+            "confirm", $"¿Eliminar la contingencia del radicado {c.Radicado}? Esta acción borra los archivos y el registro, y no se puede deshacer.");
+        if (!confirmado)
+        {
+            return;
+        }
+
+        eliminandoRadicado = c.Radicado;
+        try
+        {
+            if (!string.IsNullOrEmpty(c.SoportesRutasJson))
+            {
+                var rutasSoportes = System.Text.Json.JsonSerializer.Deserialize<List<string>>(c.SoportesRutasJson) ?? [];
+                foreach (var ruta in rutasSoportes)
+                {
+                    ArchivoService.Eliminar(ruta);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(c.FirmaRuta))
+            {
+                ArchivoService.Eliminar(c.FirmaRuta);
+            }
+
+            var resultado = await ContingenciasService.EliminarAsync(c.Cia, c.Radicado);
+            await JS.InvokeVoidAsync("Tran", resultado.Mensaje, "");
+
+            if (resultado.Exito)
+            {
+                resultados?.Remove(c);
+                if (detalle == c)
+                {
+                    CerrarDetalle();
+                }
+            }
+        }
+        finally
+        {
+            eliminandoRadicado = null;
+        }
+    }
+
     private async Task ExportarAsync()
     {
         exportando = true;
@@ -325,4 +392,17 @@
     }
 
     private static string? NuloSiVacio(string valor) => string.IsNullOrWhiteSpace(valor) ? null : valor;
+
+    // Rango por defecto al abrir la página: del día 1 al último día del mes en curso.
+    private static string PrimerDiaMesActual()
+    {
+        var hoy = DateTime.Today;
+        return new DateTime(hoy.Year, hoy.Month, 1).ToString("yyyy-MM-dd");
+    }
+
+    private static string UltimoDiaMesActual()
+    {
+        var hoy = DateTime.Today;
+        return new DateTime(hoy.Year, hoy.Month, DateTime.DaysInMonth(hoy.Year, hoy.Month)).ToString("yyyy-MM-dd");
+    }
 }

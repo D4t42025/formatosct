@@ -28,6 +28,15 @@ public static class ClaimsPrincipalExtensions
     // no algo que exista como tal en la base.
     public static bool PuedeGestionarFormatos(this ClaimsPrincipal user) =>
         user.IdRol() is "27" or "29" or "30";
+
+    // Restricción deliberadamente más estricta que PuedeGestionarFormatos: el borrado es
+    // destructivo (BD + archivo/blob), así que solo lo puede usar la cuenta interna de
+    // validación "Imperium" de la CIA 890330031 (ver MIGRACION-AZURE-JUNTAS.md sección 29),
+    // no cualquier usuario que tenga rol 27/29/30. Decisión explícita del usuario
+    // (2026-10-18, confirmada por ask_user): comparación literal de usuario + CIA, no de rol.
+    // Se usa tanto en "Consultar formato" como en "Consultar nueva contingencia".
+    public static bool PuedeEliminarComoImperium(this ClaimsPrincipal user) =>
+        user.Cia() == "890330031" && string.Equals(user.UsuApp(), "Imperium", StringComparison.OrdinalIgnoreCase);
     public static bool ModuloInicioActivo(this ClaimsPrincipal user) => user.FindFirst(ImperiumClaimTypes.ModActIni)?.Value == "1";
 
     public static bool TieneModulo(this ClaimsPrincipal user, string texto) =>

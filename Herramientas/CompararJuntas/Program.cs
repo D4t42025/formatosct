@@ -2,32 +2,27 @@ using System.Text;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 
-// Compara, SOLO para el proceso de Juntas, el esquema de la base de pruebas (DQUALITYREC,
-// 172.25.2.15,1435 — cadena "DQUALITY" de Contingencia.Web/appsettings.Development.json) contra la
-// base de producción real (servidor 168, DQUALITY — cadena armada con la variable de entorno de
-// usuario SQLCMDPASSWORD_PROD168, nunca impresa). No copia ni modifica nada: solo lee metadatos
-// (sys.tables/sys.columns/sys.procedures/sys.parameters + OBJECT_DEFINITION) y compara.
+// Compara el esquema de una base "izquierda" contra la producción real (servidor 168, DQUALITY —
+// cadena armada con la variable de entorno de usuario SQLCMDPASSWORD_PROD168, nunca impresa). No
+// copia ni modifica nada: solo lee metadatos (sys.tables/sys.columns/sys.procedures/sys.parameters +
+// OBJECT_DEFINITION) y compara.
 //
-//   dotnet run --project Herramientas/CompararJuntas
+//   dotnet run --project Herramientas/CompararJuntas                 -> pruebas (DQUALITYREC) vs 168
+//   dotnet run --project Herramientas/CompararJuntas -- formatosct   -> server 13 (FormatosCT) vs 168
 //
-// Requiere SQLCMDPASSWORD_PROD168 definida como variable de entorno de usuario (clave SQL de "sa"
-// contra 45.169.253.168). La cadena de pruebas sale de appsettings.Development.json de Contingencia.Web
-// (no hace falta ponerla aquí).
+// Requiere SQLCMDPASSWORD_PROD168 (clave de 'sa' contra 45.169.253.168) siempre, y además
+// SQLCMDPASSWORD_FORMATOSCT (clave de 'admin' contra 172.25.2.13) en modo "formatosct".
+// La cadena de pruebas sale de appsettings.Development.json de Contingencia.Web (no hace falta
+// ponerla aquí).
 
-var raiz = Directory.GetParent(AppContext.BaseDirectory)!;
-var raizRepo = BuscarRaizRepo(AppContext.BaseDirectory);
-var configWeb = new ConfigurationBuilder()
-    .SetBasePath(Path.Combine(raizRepo, "Contingencia.Web"))
-    .AddJsonFile("appsettings.json", optional: true)
-    .AddJsonFile("appsettings.Development.json", optional: true)
-    .Build();
-
-var cadenaPruebas = configWeb.GetConnectionString("DQUALITY");
-if (string.IsNullOrWhiteSpace(cadenaPruebas))
+var modo = args.Length > 0 ? args[0].Trim().ToLowerInvariant() : "pruebas";
+if (modo is not ("pruebas" or "formatosct"))
 {
-    Console.Error.WriteLine("No se encontró ConnectionStrings:DQUALITY en Contingencia.Web/appsettings.Development.json.");
+    Console.Error.WriteLine("Uso: dotnet run --project Herramientas/CompararJuntas [-- pruebas|formatosct]");
     return 2;
 }
+
+var raizRepo = BuscarRaizRepo(AppContext.BaseDirectory);
 
 var claveProd = Environment.GetEnvironmentVariable("SQLCMDPASSWORD_PROD168", EnvironmentVariableTarget.User)
     ?? Environment.GetEnvironmentVariable("SQLCMDPASSWORD_PROD168");
@@ -37,9 +32,38 @@ if (string.IsNullOrWhiteSpace(claveProd))
     return 2;
 }
 
+string cadenaIzquierda;
+string etiquetaIzquierda;
+if (modo == "pruebas")
+{
+    var configWeb = new ConfigurationBuilder()
+        .SetBasePath(Path.Combine(raizRepo, "Contingencia.Web"))
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddJsonFile("appsettings.Development.json", optional: true)
+        .Build();
+    cadenaIzquierda = configWeb.GetConnectionString("DQUALITY") ?? "";
+    if (string.IsNullOrWhiteSpace(cadenaIzquierda))
+    {
+        Console.Error.WriteLine("No se encontró ConnectionStrings:DQUALITY en Contingencia.Web/appsettings.Development.json.");
+        return 2;
+    }
+    etiquetaIzquierda = "Pruebas";
+}
+else
+{
+    var claveFormatosCt = Environment.GetEnvironmentVariable("SQLCMDPASSWORD_FORMATOSCT", EnvironmentVariableTarget.User)
+        ?? Environment.GetEnvironmentVariable("SQLCMDPASSWORD_FORMATOSCT");
+    if (string.IsNullOrWhiteSpace(claveFormatosCt))
+    {
+        Console.Error.WriteLine("Falta la variable de entorno de usuario SQLCMDPASSWORD_FORMATOSCT (clave de 'admin' en el servidor 13, 172.25.2.13).");
+        return 2;
+    }
+    cadenaIzquierda = $"Server=172.25.2.13;Database=FormatosCT;User Id=admin;Password={claveFormatosCt};TrustServerCertificate=True;Connect Timeout=30";
+    etiquetaIzquierda = "FormatosCT (server 13)";
+}
 var cadenaProduccion = $"Server=45.169.253.168;Database=DQUALITY;User Id=sa;Password={claveProd};TrustServerCertificate=True;Connect Timeout=30";
 
-await using var pruebas = new SqlConnection(cadenaPruebas);
+await using var pruebas = new SqlConnection(cadenaIzquierda);
 await using var produccion = new SqlConnection(cadenaProduccion);
 try
 {
@@ -50,35 +74,83 @@ catch (Exception e)
 {
     // No se imprime el mensaje completo de SqlException tal cual por si acaso llegara a incluir la cadena;
     // en la práctica SqlClient no la incluye, pero se evita a propósito.
-    Console.Error.WriteLine("No se pudo conectar a alguna de las dos bases (revise la clave y la conectividad de red al servidor 168).");
+    Console.Error.WriteLine($"No se pudo conectar a alguna de las dos bases (revise la clave y la conectividad de red al servidor 168 / {etiquetaIzquierda}).");
     Console.Error.WriteLine("Tipo de error: " + e.GetType().Name);
     return 2;
 }
 
-Console.WriteLine($"Pruebas    : {pruebas.DataSource} / {pruebas.Database}");
-Console.WriteLine($"Producción : {produccion.DataSource} / {produccion.Database}");
+Console.WriteLine($"{etiquetaIzquierda,-24}: {pruebas.DataSource} / {pruebas.Database}");
+Console.WriteLine($"{"Producción (168)",-24}: {produccion.DataSource} / {produccion.Database}");
 Console.WriteLine();
 
-// Tablas usadas en el recorrido Login -> módulo Juntas (ver MIGRACION-AZURE-JUNTAS.md, sección 20).
-string[] tablas =
-[
-    "DQS_REC_USUARIOS", "DQS_REC_CLIENTES", "DQS_REC_IPS",
-    "DQS_REC_ROLMODULO", "DQS_REC_ROLES", "DQS_REC_MODULOS", "DQS_OPT_LOGUEO",
-    "DQS_MIP_TOKEN", "DQS_MIP_CRUZAR",
-    "DQS_MIP_PROFESIONALES", "DQS_MIP_PROFESIONALESACTA", "DQS_MIP_JUNTASC",
-    "ImperiumSesionPuente",
-];
+// Tablas a comparar. En modo "pruebas" solo las del recorrido Login -> módulo Juntas (ver
+// MIGRACION-AZURE-JUNTAS.md, sección 20). En modo "formatosct" las 24 tablas reales del paquete de
+// despliegue (Contingencia.Infrastructure/Sql/Produccion/01_Tablas.sql) — Formatos + Juntas completos.
+string[] tablas = modo == "pruebas"
+    ?
+    [
+        "DQS_REC_USUARIOS", "DQS_REC_CLIENTES", "DQS_REC_IPS",
+        "DQS_REC_ROLMODULO", "DQS_REC_ROLES", "DQS_REC_MODULOS", "DQS_OPT_LOGUEO",
+        "DQS_MIP_TOKEN", "DQS_MIP_CRUZAR",
+        "DQS_MIP_PROFESIONALES", "DQS_MIP_PROFESIONALESACTA", "DQS_MIP_JUNTASC",
+        "ImperiumSesionPuente",
+    ]
+    :
+    [
+        "DQS_REC_USUARIOS", "DQS_REC_ROLES", "DQS_REC_ROLMODULO", "DQS_REC_MODULOS", "DQS_REC_CLIENTES",
+        "DQS_REC_IPS", "DQS_REC_NOTIFICACIONES", "DQS_OPT_LOGUEO", "ImperiumSesionPuente",
+        "DQS_MIP_FORMATOS", "DQS_MIP_COD_HAB", "DQS_MIP_TOKEN", "DQS_MIP_PROFESIONALES",
+        "DQS_MIP_PROFESIONALESACTA", "DQS_MIP_JUNTASC", "DQS_MIP_CRUZAR", "DQS_MIP_CONTINGENCIAS",
+        "DQS_MIP_CONTINGENCIAS_TEC", "DQS_MIP_CONT_PARAMETRICAS", "DQS_MIP_AFILIADOS_TOKEN",
+        "DQS_MIP_CIA_PARAMETROS", "DQS_MIP_DCI", "DQS_MIP_CODIGOS", "DQS_REC_CARGUECIE10",
+    ];
 
-// Procedimientos usados en el mismo recorrido. sp_DQS_ConsultaFiltros se trata aparte: en pruebas es
-// la versión "delgada" (02b_ProcedimientoFiltrosDelgado.sql) y en producción es el multiplexor legado
+// Procedimientos a comparar con el mismo criterio. ImperiumSesionPuente es tabla nueva de esta
+// migración (no viene del 168) — su diferencia conocida (columna IdRol) ya está documentada.
+// sp_DQS_ConsultaFiltros se trata aparte en ambos modos: en "pruebas"/"formatosct" es la versión
+// "delgada" (02b_ProcedimientoFiltrosDelgado.sql) y en producción (168) es el multiplexor legado
 // completo — por diseño NO son el mismo texto, así que no se compara textualmente, solo existencia +
 // parámetros.
-string[] procedimientosComparables =
-[
-    "sp_DQS_ConsultaUsuario", "sp_DQS_ConsultaModxRol", "sp_DQS_ActualizaMarcaUsuario", "sp_opt_ingresalogueo",
-    "sp_DQS_ConsultaProfesionalAñadido", "sp_DQS_ConsultaProfesional",
-    "sp_DQS_AsignaProfesional", "sp_DQS_EliminaProfesional", "sp_DQS_ActualizaProfesional", "sp_DQS_ActualizaJunta",
-];
+string[] procedimientosComparables = modo == "pruebas"
+    ?
+    [
+        "sp_DQS_ConsultaUsuario", "sp_DQS_ConsultaModxRol", "sp_DQS_ActualizaMarcaUsuario", "sp_opt_ingresalogueo",
+        "sp_DQS_ConsultaProfesionalAñadido", "sp_DQS_ConsultaProfesional",
+        "sp_DQS_AsignaProfesional", "sp_DQS_EliminaProfesional", "sp_DQS_ActualizaProfesional", "sp_DQS_ActualizaJunta",
+    ]
+    :
+    [
+        // Copias directas del legado (deberían coincidir cuerpo a cuerpo con el 168):
+        "sp_DQS_ConsultaUsuario", "sp_DQS_ConsultaModxRol", "sp_DQS_ActualizaMarcaUsuario", "sp_OPT_IngresaLogueo",
+        "sp_DQS_ActualizaPwd",
+        "sp_DQS_ConsultaProfesionalAñadido", "sp_DQS_ConsultaProfesional",
+        "sp_DQS_AsignaProfesional", "sp_DQS_EliminaProfesional", "sp_DQS_ActualizaProfesional", "sp_DQS_ActualizaJunta",
+        // SP nuevos de esta app (es normal que NO existan en el 168 — no son del legado):
+        "sp_MIP_InsertaFormatoCnt", "sp_MIP_ConsultaFormatosCNT", "sp_MIP_ActualizaFormatoCnt",
+        "sp_DQS_MIP_ProfesionalesResolverUsuario", "sp_DQS_MIP_ProfesionalesSincronizarUsuario",
+        "sp_DQS_MIP_ProfesionalesConsultar", "sp_DQS_MIP_ProfesionalesObtener", "sp_DQS_MIP_ProfesionalesInsertar",
+        "sp_DQS_MIP_ProfesionalesActualizar", "sp_DQS_MIP_ProfesionalesCambiarEstado",
+        "sp_DQS_MIP_ProfesionalesResumen", "sp_DQS_MIP_ProfesionalesListas",
+        "sp_MIP_InsertaContingencia", "sp_MIP_ConsultaTokenAfiliados", "sp_MIP_InsertaTokenAfiliados",
+        "sp_MIP_ActualizaContingenciaArchivos", "sp_MIP_ConsultaContingencias", "sp_MIP_ConsultaContingenciaTecnologias",
+        "sp_MIP_ConsultaParametricas", "sp_MIP_InsertaParametrica", "sp_MIP_ConsultaCiaParametros",
+        "sp_MIP_CrearUsuarioFormatos", "sp_MIP_CambiarClaveUsuario",
+    ];
+// Nombres de SP que es normal que falten en el 168 (son nuevos de esta app, no existían en el legado).
+HashSet<string> nuevosEnEstaApp = modo == "formatosct"
+    ?
+    [
+        "sp_MIP_InsertaFormatoCnt", "sp_MIP_ConsultaFormatosCNT", "sp_MIP_ActualizaFormatoCnt",
+        "sp_DQS_MIP_ProfesionalesResolverUsuario", "sp_DQS_MIP_ProfesionalesSincronizarUsuario",
+        "sp_DQS_MIP_ProfesionalesConsultar", "sp_DQS_MIP_ProfesionalesObtener", "sp_DQS_MIP_ProfesionalesInsertar",
+        "sp_DQS_MIP_ProfesionalesActualizar", "sp_DQS_MIP_ProfesionalesCambiarEstado",
+        "sp_DQS_MIP_ProfesionalesResumen", "sp_DQS_MIP_ProfesionalesListas",
+        "sp_MIP_InsertaContingencia", "sp_MIP_ConsultaTokenAfiliados", "sp_MIP_InsertaTokenAfiliados",
+        "sp_MIP_ActualizaContingenciaArchivos", "sp_MIP_ConsultaContingencias", "sp_MIP_ConsultaContingenciaTecnologias",
+        "sp_MIP_ConsultaParametricas", "sp_MIP_InsertaParametrica", "sp_MIP_ConsultaCiaParametros",
+        "sp_MIP_CrearUsuarioFormatos", "sp_MIP_CambiarClaveUsuario",
+    ]
+    : [];
 const string procedimientoMultiplexor = "sp_DQS_ConsultaFiltros";
 
 var difs = 0;
@@ -116,10 +188,11 @@ foreach (var sp in procedimientosComparables)
 {
     var defPruebas = await DefinicionProcedimiento(pruebas, sp);
     var defProd = await DefinicionProcedimiento(produccion, sp);
+    var esNuevoDeEstaApp = nuevosEnEstaApp.Contains(sp);
     string resultado;
     if (defPruebas is null && defProd is null) { resultado = "no existe en ninguna"; }
     else if (defPruebas is null) { resultado = "FALTA en pruebas"; difs++; }
-    else if (defProd is null) { resultado = "FALTA en producción"; difs++; }
+    else if (defProd is null) { resultado = esNuevoDeEstaApp ? "nuevo de esta app (no existía en 168, es esperado)" : "FALTA en producción"; if (!esNuevoDeEstaApp) difs++; }
     else
     {
         var parametrosPruebas = await Parametros(pruebas, sp);

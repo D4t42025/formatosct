@@ -37,4 +37,21 @@ public class ContingenciaArchivoService(IWebHostEnvironment entorno, IConfigurat
     }
 
     public bool Existe(string rutaRelativa) => File.Exists(RutaFisica(rutaRelativa));
+
+    // Borrado físico (disco) de un soporte o firma puntual — llamado por
+    // ConsultarNuevaContingencia.razor antes de eliminar el registro de BD, por cada ruta
+    // relativa en SOPORTES_RUTAS_JSON y por FIRMA_RUTA si existe. Este servicio es 100%
+    // disco (no hay enrutado dinámico a Azure para Nueva Contingencia, a diferencia de
+    // IFormatosArchivoService — ver MIGRACION-AZURE-JUNTAS.md sección 30).
+    public bool Eliminar(string rutaRelativa)
+    {
+        var rutaFisica = RutaFisica(rutaRelativa);
+        if (!File.Exists(rutaFisica))
+        {
+            return false;
+        }
+
+        File.Delete(rutaFisica);
+        return true;
+    }
 }

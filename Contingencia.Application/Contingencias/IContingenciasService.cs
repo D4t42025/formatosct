@@ -70,4 +70,10 @@ public interface IContingenciasService
         string cia, string radicado, string? firmaRuta, string? soportesRutasJson);
 
     Task<ResultadoConsultaContingencias> ConsultarAsync(string cia, string? usuario, FiltroConsultaContingencias filtro);
+
+    // Borra los registros de DQS_MIP_CONTINGENCIAS + DQS_MIP_CONTINGENCIAS_TEC. Restringido
+    // en el llamador (Razor) a la cuenta "Imperium" vía
+    // ClaimsPrincipalExtensions.PuedeEliminarComoImperium — este método no valida permisos.
+    // No borra los archivos de soportes/firma (lo hace el llamador antes de invocar esto).
+    Task<ResultadoRegistrarContingencia> EliminarAsync(string cia, string radicado);
 }

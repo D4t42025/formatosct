@@ -34,4 +34,9 @@ public interface IFormatosRepository
     // lo usa internamente para armar el HTML del enlace "Gestion") — se consulta aparte,
     // parametrizado, mismo criterio que BuscarPrestadorAsync.
     Task<string?> ConsultarEmailAsync(string cia, string radicado);
+
+    // sp_MIP_EliminaFormatoCnt (ver Sql/014_MipEliminaFormatoCnt.sql) — borra el registro de
+    // DQS_MIP_FORMATOS. No borra el archivo adjunto (eso lo hace el llamador vía
+    // IFormatosArchivoService, antes o después, según convenga).
+    Task<bool> EliminarAsync(string cia, string radicado);
 }
