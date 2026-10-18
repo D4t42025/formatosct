@@ -10,11 +10,17 @@ public interface IContingenciaArchivoService
 {
     string RutaRelativaSoporte(string cia, string radicado, int indice, string extension);
     string RutaRelativaFirma(string cia, string radicado);
-    string RutaFisica(string rutaRelativa);
     Task GuardarAsync(string rutaRelativa, Stream contenido);
     Task GuardarBase64PngAsync(string rutaRelativa, string imagenBase64Png);
     bool Existe(string rutaRelativa);
 
-    // Borrado físico de un soporte/firma puntual (disco) — ver implementación.
+    // Borrado físico (disco) o del blob (Azure) de un soporte/firma puntual — ver implementación.
     bool Eliminar(string rutaRelativa);
+
+    // Antes era RutaFisica(...) (una ruta en disco que /api/contingencias/archivo y
+    // /api/contingencias/formulario le pasaban directo a Results.File/File.ReadAllBytesAsync).
+    // Con el enrutado dinámico a Azure Blob Storage (ver ContingenciaArchivoServiceSelector)
+    // ya no existe siempre una ruta de archivo local, así que ambos endpoints abren el
+    // contenido como stream sin importar de dónde venga (disco o blob).
+    Task<Stream?> AbrirAsync(string rutaRelativa);
 }

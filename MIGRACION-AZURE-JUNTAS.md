@@ -1473,3 +1473,113 @@ residual).
   como variable de entorno de usuario `SQLCMDPASSWORD_DQUALITYREC`
   (mismo patrón que `SQLCMDPASSWORD_FORMATOSCT`/`SQLCMDPASSWORD_PROD168`),
   nunca impresas en código ni commits.
+
+
+## 32. Nueva Contingencia también migra a Azure Blob Storage para CIA 890330031, en carpeta distinta a Formatos (18-oct-2026)
+
+### 32.1. Pregunta del usuario y respuesta
+
+- **"todos los documentos del cia 890330031 van al azure de las dos formatos
+  normal y nuevo?"** → No. Hasta este punto solo **Formatos** (IFormatosArchivoService /
+  FormatosArchivoServiceSelector) enrutaba dinámicamente por CIA a Azure. **Nueva
+  Contingencia** seguía 100% en disco (App_Data/mediauploader/contingencias), sin
+  ningún enrutado — confirmado en código (ContingenciaArchivoService no tenía
+  lógica de CIA ni dependencia de Azure).
+- **"diferente a esa cia val al disco cierto"** → Sí, confirmado: cualquier CIA
+  distinto de 890330031 sigue guardando en disco local, tanto en Formatos como
+  (ahora) en Nueva Contingencia. Nada cambia para esos CIAs.
+- **Pedido**: migrar también Nueva Contingencia a Azure para CIA 890330031, pero
+  en una **carpeta distinta** a la de Formatos normales, y que la lista de CIAs
+  sea **dinámica** (configuración, no código) para poder sumar CIAs a futuro sin
+  tocar el código — exactamente el mismo patrón ya usado por
+  FormatosArchivoServiceSelector.
+
+### 32.2. Diseño
+
+- **Misma cuenta y mismo contenedor de Azure que Formatos** (gitsanitas /
+  ormatosct, mismo Almacenamiento:Azure:ConnectionString ya configurado vía
+  dotnet user-secrets) — no se crea una cuenta ni contenedor nuevo, solo una
+  carpeta distinta dentro del mismo contenedor:
+  `
+  Formatos:            {cia}/Formatos/{radicado}{extensión}
+  Nueva Contingencia:  {cia}/Contingencias/{radicado}/soporte_{indice}{extensión} | firma.png
+  `
+- **Enrutado dinámico por CIA**, igual patrón que Formatos: lista de CIAs en
+  Almacenamiento:Azure:CiasContingenciasAzure (config), con fallback
+  hardcodeado a ["890330031"] si la clave no existe (mismo criterio que
+  CiasFormatosAzure, que tampoco está en ppsettings.json — depende del
+  default). Cualquier CIA no listado sigue en disco sin cambios.
+- Diferencia de forma respecto a Formatos: IContingenciaArchivoService no
+  recibe cia explícito en GuardarAsync/Existe/Eliminar/AbrirAsync (solo
+  recibe la ruta relativa ya armada, p. ej. "890330031/202601001/soporte_1.pdf"),
+  así que el selector extrae el CIA del **primer segmento** de esa ruta relativa
+  para decidir disco vs. Azure.
+
+### 32.3. Cambios de código
+
+- **IContingenciaArchivoService.cs**: se eliminó RutaFisica(...) del
+  contrato público (ya no tiene sentido una única "ruta física" si el backend
+  puede ser Azure) y se agregó Task<Stream?> AbrirAsync(string rutaRelativa)
+  — mismo criterio ya usado por IJuntasArchivoService.AbrirAsync cuando Juntas
+  migró a Azure.
+- **ContingenciaArchivoService.cs** (disco): RutaFisica pasó de public a
+  private (sigue usándose internamente); se agregó AbrirAsync que abre un
+  FileStream si el archivo existe en disco, o 
+ull si no.
+- **ContingenciaArchivoServiceAzure.cs** (nuevo): implementación Azure del
+  contrato. Reutiliza ContingenciaArchivoService.RutaRelativaSoporte/Firma
+  (son solo constructores de string, sin I/O) y arma el nombre del blob
+  insertando "Contingencias/" después del primer segmento (CIA) de la ruta
+  relativa. GuardarAsync/GuardarBase64PngAsync/Existe/Eliminar/AbrirAsync
+  equivalentes a FormatosArchivoServiceAzure pero vía BlobClient directo.
+- **ContingenciaArchivoServiceSelector.cs** (nuevo): equivalente a
+  FormatosArchivoServiceSelector. Resuelve disco vs. Azure según el primer
+  segmento (CIA) de la ruta relativa recibida; RutaRelativaSoporte/RutaRelativaFirma
+  siempre delegan a disco (idénticos en ambos backends, sin I/O). Azure se
+  resuelve perezoso (Lazy) para no exigir el connection string si ningún CIA
+  está configurado.
+- **Program.cs**:
+  - DI: se registró ContingenciaArchivoService (concreto), ContingenciaArchivoServiceAzure
+    (concreto) y IContingenciaArchivoService -> ContingenciaArchivoServiceSelector
+    (mismo patrón que Formatos, reemplazando el registro directo anterior a
+    ContingenciaArchivoService).
+  - /api/contingencias/formulario: la lectura de la firma para el PDF pasó de
+    File.ReadAllBytesAsync(archivoService.RutaFisica(...)) a
+    rchivoService.AbrirAsync(...) + copiar a MemoryStream — funciona igual
+    venga de disco o de Azure.
+  - /api/contingencias/archivo: la descarga de soportes/firma pasó de
+    Results.File(rutaFisica, contentType) a
+    Results.File(await archivoService.AbrirAsync(ruta), contentType) — mismo
+    criterio.
+
+### 32.4. Validación
+
+- dotnet build sobre toda la solución → 0 errores (mismas advertencias
+  preexistentes de siempre, ninguna nueva).
+- **Prueba funcional real contra Azure** (proyecto de consola temporal, cuenta
+  gitsanitas, contenedor ormatosct, usando el mismo ConnectionString
+  configurado en dotnet user-secrets del proyecto — proyecto de prueba
+  borrado al terminar):
+  1. Subida de un blob de prueba a 890330031/Contingencias/TEST_SANITY_CHECK_2026/soporte_1.txt
+     → Existe = 	rue.
+  2. Descarga y verificación de contenido → texto esperado leído correctamente.
+  3. Borrado (DeleteIfExists) → 	rue; Existe tras borrar → alse.
+  4. Confirmado que el prefijo de Contingencias (890330031/Contingencias/...)
+     es distinto al de Formatos (890330031/Formatos/...) dentro del mismo
+     contenedor — no hay cruce de documentos entre ambos flujos.
+
+### 32.5. Qué NO cambió
+
+- La cuenta/contenedor de Azure: se reutiliza gitsanitas/ormatosct, no se
+  creó infraestructura nueva.
+- El comportamiento para CIAs distintos de 890330031: siguen 100% en disco,
+  tanto en Formatos como en Nueva Contingencia, sin ningún cambio.
+- ppsettings.json/ppsettings.Development.json: no se agregó la clave
+  CiasContingenciasAzure a ningún archivo (igual que CiasFormatosAzure
+  tampoco está ahí) — el selector usa el fallback hardcodeado ["890330031"]
+  mientras no se configure explícitamente.
+- sp_MIP_EliminaContingencia/sp_MIP_EliminaFormatoCnt (sección 31): el
+  borrado de archivo en ConsultarNuevaContingencia.razor/ConsultarFormato.razor
+  sigue llamando a ArchivoService.Eliminar(ruta) tal cual — ahora ese método,
+  al pasar por el selector, también elimina el blob de Azure si el CIA
+  corresponde, sin cambios en el Razor.

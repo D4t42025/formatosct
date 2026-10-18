@@ -138,7 +138,13 @@ builder.Services.AddScoped<IContingenciasRepository, ContingenciasRepository>();
 builder.Services.AddScoped<IContingenciasService, ContingenciasService>();
 builder.Services.AddSingleton<IFormularioContingenciaPdfBuilder, FormularioContingenciaPdfBuilder>();
 builder.Services.AddScoped<IContingenciaFormularioService, ContingenciaFormularioService>();
-builder.Services.AddScoped<IContingenciaArchivoService, ContingenciaArchivoService>();
+builder.Services.AddScoped<ContingenciaArchivoService>();
+// Enrutado dinámico por CIA (ver ContingenciaArchivoServiceSelector): solo CIA 890330031
+// (Sanitas) guarda/visualiza/elimina sus soportes/firma de Nueva Contingencia en Azure Blob
+// Storage (mismo contenedor "formatosct" que Formatos, carpeta "Contingencias"); el resto
+// sigue en mediauploader sin cambios.
+builder.Services.AddScoped<ContingenciaArchivoServiceAzure>();
+builder.Services.AddScoped<IContingenciaArchivoService, ContingenciaArchivoServiceSelector>();
 builder.Services.AddScoped<IParametricasRepository, ParametricasRepository>();
 builder.Services.AddScoped<IParametricasService, ParametricasService>();
 builder.Services.AddScoped<ICiaParametrosRepository, CiaParametrosRepository>();
@@ -288,9 +294,15 @@ app.MapGet("/api/contingencias/formulario", async (HttpContext context, string r
     if (contingencia is null) return Results.NotFound();
 
     byte[]? firma = null;
-    if (!string.IsNullOrWhiteSpace(contingencia.FirmaRuta) && archivoService.Existe(contingencia.FirmaRuta))
+    if (!string.IsNullOrWhiteSpace(contingencia.FirmaRuta))
     {
-        firma = await File.ReadAllBytesAsync(archivoService.RutaFisica(contingencia.FirmaRuta));
+        await using var contenidoFirma = await archivoService.AbrirAsync(contingencia.FirmaRuta);
+        if (contenidoFirma is not null)
+        {
+            using var buffer = new MemoryStream();
+            await contenidoFirma.CopyToAsync(buffer);
+            firma = buffer.ToArray();
+        }
     }
 
     var pdf = await formularioService.GenerarAsync(cia, contingencia, firma);
@@ -324,10 +336,10 @@ app.MapGet("/api/contingencias/archivo", async (HttpContext context, string radi
 
     if (!rutasPermitidas.Contains(ruta)) return Results.NotFound();
 
-    var rutaFisica = archivoService.RutaFisica(ruta);
-    if (!archivoService.Existe(ruta)) return Results.NotFound();
+    var contenido = await archivoService.AbrirAsync(ruta);
+    if (contenido is null) return Results.NotFound();
 
-    var contentType = Path.GetExtension(rutaFisica).ToLowerInvariant() switch
+    var contentType = Path.GetExtension(ruta).ToLowerInvariant() switch
     {
         ".pdf" => "application/pdf",
         ".png" => "image/png",
@@ -339,7 +351,7 @@ app.MapGet("/api/contingencias/archivo", async (HttpContext context, string radi
         _ => "application/octet-stream",
     };
 
-    return Results.File(rutaFisica, contentType);
+    return Results.File(contenido, contentType);
 }).RequireAuthorization();
 
 app.MapGet("/api/juntas/acta", async (HttpContext context, string prescripcion, string? regimen, IJuntasService juntasService) =>
