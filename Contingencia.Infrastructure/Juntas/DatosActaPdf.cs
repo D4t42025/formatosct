@@ -35,6 +35,10 @@ public record DatosActaPdf(
     string HistoriaClinica,
     string DiagnosticoPrincipal,
     string AmbitoAtencion,
+    // Antes siempre vacío en el acta (ver ActaPdfBuilder) — ahora viaja el régimen real
+    // usado para resolver la prescripción (Contributivo/Subsidiado), tomado del filtro de
+    // búsqueda de /juntas en vez de quedar en blanco.
+    string UsuarioRegimen,
     IReadOnlyList<MipresMedicamento> Medicamentos,
     IReadOnlyList<MipresProcedimiento> Procedimientos,
     IReadOnlyList<MipresDispositivo> Dispositivos,

@@ -99,11 +99,27 @@ builder.Services.AddScoped<IFormatosArchivoService, FormatosArchivoService>();
 builder.Services.AddScoped<IExcelExportService, ExcelExportService>();
 builder.Services.AddScoped<IJuntasRepository, JuntasRepository>();
 builder.Services.AddScoped<IActaPdfBuilder, ActaPdfBuilder>();
-builder.Services.AddHttpClient<IJuntaProfesionalApiClient, JuntaProfesionalApiClient>();
+// AutomaticDecompression: la API de SISPRO no la activa por defecto en HttpClient — al
+// pedir gzip/deflate el payload JSON de cada día viaja comprimido y baja el tiempo de
+// transferencia (más notorio en días con muchos registros), sin tocar nada del lado del
+// servidor del gobierno. MaxConnectionsPerServer explícito en 20 (por encima del tope de
+// 15 llamadas en paralelo de JuntasService) para que el pool de conexiones nunca sea el
+// cuello de botella.
+builder.Services.AddHttpClient<IJuntaProfesionalApiClient, JuntaProfesionalApiClient>()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
+        MaxConnectionsPerServer = 20,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    });
 builder.Services.AddHttpClient<IFirmaImagenService, FirmaImagenService>();
 builder.Services.AddScoped<IJuntasService, JuntasService>();
 builder.Services.AddScoped<IJuntasFirmaService, JuntasFirmaService>();
-builder.Services.AddScoped<IJuntasArchivoService, JuntasArchivoService>();
+// Migrado a Azure Blob Storage (cuenta "gitsanitas", contenedor "juntas") — antes
+// guardaba/leía de App_Data\mediauploader (JuntasArchivoService, aún disponible si hay
+// que volver atrás). Requiere "Almacenamiento:Azure:ConnectionString" en configuración
+// (dotnet user-secrets en desarrollo, variable de entorno/Key Vault en producción).
+builder.Services.AddScoped<IJuntasArchivoService, JuntasArchivoServiceAzure>();
 builder.Services.AddScoped<IProfesionalesRepository, ProfesionalesRepository>();
 builder.Services.AddScoped<IProfesionalesService, ProfesionalesService>();
 builder.Services.AddScoped<IProfesionalFirmaArchivoService, ProfesionalFirmaArchivoService>();
@@ -321,23 +337,26 @@ app.MapGet("/api/contingencias/archivo", async (HttpContext context, string radi
     return Results.File(rutaFisica, contentType);
 }).RequireAuthorization();
 
-app.MapGet("/api/juntas/acta", async (HttpContext context, string prescripcion, IJuntasService juntasService) =>
+app.MapGet("/api/juntas/acta", async (HttpContext context, string prescripcion, string? regimen, IJuntasService juntasService) =>
 {
     // Réplica del botón "PDF" de gvconsulta_OnRowCommand en JuntaProfesional.aspx.vb: el
     // acta se genera al vuelo contra la API de SISPRO en cada solicitud (el legado tampoco
     // la guarda en disco), así que este endpoint no necesita más que el número de
     // prescripción — la cía y el tipo de token salen de la sesión autenticada, nunca de un
     // parámetro que el cliente pudiera manipular para pedir el acta de otra compañía.
+    // "regimen" sí viaja como parámetro (refleja el filtro de búsqueda que trajo la fila en
+    // pantalla) pero no es sensible — GenerarActaPdfAsync lo sanea a Contributivo/Subsidiado
+    // con fallback a Contributivo, así que no hay forma de usarlo para escalar privilegios.
     var usuario = context.User;
     if (usuario.Identity?.IsAuthenticated != true) return Results.Unauthorized();
 
     var cia = usuario.Cia();
     var tokenIps = usuario.TokenMipres() == "IPS";
-    var pdf = await juntasService.GenerarActaPdfAsync(cia, tokenIps, prescripcion);
+    var pdf = await juntasService.GenerarActaPdfAsync(cia, tokenIps, prescripcion, regimen ?? "Contributivo");
     return Results.File(pdf, "application/pdf");
 }).RequireAuthorization(ImperiumPolicies.ModuloJuntas);
 
-app.MapGet("/api/juntas/cargue", (HttpContext context, string prescripcion, string archivo, IJuntasArchivoService archivoService) =>
+app.MapGet("/api/juntas/cargue", async (HttpContext context, string prescripcion, string archivo, IJuntasArchivoService archivoService) =>
 {
     // Equivalente a los enlaces "Ver" de JuntasCargueDoc.aspx (que servían directo desde
     // ~/MediaUploader/ sin autenticación) — acá se exige sesión activa y la CIA sale
@@ -346,10 +365,11 @@ app.MapGet("/api/juntas/cargue", (HttpContext context, string prescripcion, stri
     var usuario = context.User;
     if (usuario.Identity?.IsAuthenticated != true) return Results.Unauthorized();
 
-    var ruta = archivoService.RutaFisica(usuario.Cia(), Path.GetFileName(prescripcion), Path.GetFileName(archivo));
-    if (ruta is null) return Results.NotFound();
+    var nombreArchivo = Path.GetFileName(archivo);
+    var contenido = await archivoService.AbrirAsync(usuario.Cia(), Path.GetFileName(prescripcion), nombreArchivo);
+    if (contenido is null) return Results.NotFound();
 
-    var contentType = Path.GetExtension(ruta).ToLowerInvariant() switch
+    var contentType = Path.GetExtension(nombreArchivo).ToLowerInvariant() switch
     {
         ".pdf" => "application/pdf",
         ".png" => "image/png",
@@ -362,7 +382,7 @@ app.MapGet("/api/juntas/cargue", (HttpContext context, string prescripcion, stri
         _ => "application/octet-stream",
     };
 
-    return Results.File(ruta, contentType);
+    return Results.File(contenido, contentType);
 }).RequireAuthorization(ImperiumPolicies.ModuloJuntas);
 
 app.Run();

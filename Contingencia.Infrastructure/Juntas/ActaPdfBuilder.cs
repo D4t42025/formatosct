@@ -168,9 +168,10 @@ public class ActaPdfBuilder(IConfiguration configuration) : IActaPdfBuilder
         var tabla = NuevaTabla(187.5f, 187.5f, 187.5f, 187.5f);
         tabla.AddCell(Celda(Texto($"Número Historia Clínica: \n{d.HistoriaClinica}", normal)));
         tabla.AddCell(Celda(Texto($"Diagnóstico Principal: \n{d.DiagnosticoPrincipal}", normal)));
-        // "Usuario Régimen" siempre queda vacío — así estaba en el legado (nunca se le
-        // asignó un valor real a esa celda).
-        tabla.AddCell(Celda(Texto("Usuario Régimen: \n", normal)));
+        // "Usuario Régimen" quedaba siempre vacío en el legado (nunca se le asignó un valor
+        // real a esa celda) — ahora imprime el régimen realmente usado para resolver la
+        // prescripción (Contributivo/Subsidiado), tomado del filtro de búsqueda.
+        tabla.AddCell(Celda(Texto($"Usuario Régimen: \n{d.UsuarioRegimen}", normal)));
         tabla.AddCell(Celda(Texto($"Ámbito de atención: \n{d.AmbitoAtencion}", normal)));
         return tabla;
     }

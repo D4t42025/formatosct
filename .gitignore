@@ -361,3 +361,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Archivos reales subidos por usuarios (firmas, PDFs, formatos) - no son código fuente
+Contingencia.Web/App_Data/
+
+# Artefactos de despliegue compilados
+Despliegue/*.zip

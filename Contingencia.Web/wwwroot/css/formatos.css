@@ -196,6 +196,50 @@
     background: #f7faff;
 }
 
+/* Encabezados ordenables: clic ordena asc/desc. El ícono de fa-sort (ambas flechas, tenue)
+   indica "ordenable pero inactivo"; al ordenar se resalta con fa-sort-up/down según
+   dirección. Se evita usar <button> dentro de <th> para no romper el layout de la tabla
+   (mismo problema ya visto con "display" no estándar en celdas, ver sección 14 del MD). */
+.fmt-th-ordenable {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease;
+}
+
+.fmt-th-ordenable:hover {
+    background: #dde9fb;
+}
+
+.fmt-th-ordenable i {
+    margin-left: 0.35rem;
+    font-size: 0.68rem;
+    opacity: 0.45;
+}
+
+.fmt-th-ordenable i.fa-sort-up,
+.fmt-th-ordenable i.fa-sort-down {
+    opacity: 1;
+    color: #2b6ff2;
+}
+
+/* Observaciones / Justificación Técnica: texto libre que, sin tope, ensanchaba la tabla
+   entera (una justificación larga empujaba todas las demás columnas). Se limita el ancho
+   de la celda y se recorta a una sola línea con elipsis — el texto completo no se pierde,
+   basta con pasar el mouse (title = tooltip nativo) para leerlo entero.
+   IMPORTANTE: esta clase va solo en <td>, nunca en <th> — un primer intento usó
+   "display: -webkit-box" (para recorte multilínea) también en los encabezados, y esa
+   propiedad reemplaza el "display: table-cell" implícito de la celda, rompiendo el cálculo
+   de ancho de columna de la tabla y haciendo que los títulos de las columnas se vieran
+   superpuestos unos sobre otros. Por eso aquí se usa recorte de una sola línea (compatible
+   con el modelo normal de celda de tabla) en vez de line-clamp multilínea. */
+.fmt-tabla td.fmt-col-texto-largo {
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: help;
+}
+
 .fmt-tabla a {
     color: #2b6ff2;
     font-size: 1rem;
@@ -203,6 +247,75 @@
 
 .fmt-tabla a:hover {
     color: #1e4fc4;
+}
+
+/* Chip de "Tipo Tecnología" (antes una sola letra M/N/P/D/S) — texto completo + ícono,
+   un color propio por tipo para reconocerlo de un vistazo sin tener que leer la palabra. */
+.fmt-chip-tecnologia {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.fmt-chip-tecnologia i {
+    font-size: 0.78rem;
+}
+
+.fmt-chip-medicamentos {
+    background: #f3e8ff;
+    color: #7c3aed;
+}
+
+.fmt-chip-nutricionales {
+    background: #e8f8ee;
+    color: #15803d;
+}
+
+.fmt-chip-procedimientos {
+    background: #eef3fd;
+    color: #1e4fc4;
+}
+
+.fmt-chip-dispositivos {
+    background: #fff4e5;
+    color: #b45309;
+}
+
+.fmt-chip-servicios {
+    background: #e6fbf8;
+    color: #0f766e;
+}
+
+.fmt-chip-desconocido {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+/* Estado (EstJM): mismo chip reutilizable, un color por estado para distinguirlos de un
+   vistazo (antes todos los estados usaban el mismo azul genérico de .fmt-estado). */
+.fmt-chip-no-requiere {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.fmt-chip-pendiente {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.fmt-chip-aprobada {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.fmt-chip-no-aprobada {
+    background: #fee2e2;
+    color: #b91c1c;
 }
 
 .fmt-estado {
@@ -220,9 +333,9 @@
     background: transparent;
     border: none;
     color: #2b6ff2;
-    font-size: 1rem;
+    font-size: 0.85rem;
     cursor: pointer;
-    padding: 0.2rem 0.4rem;
+    padding: 0.15rem 0.3rem;
     border-radius: 0.4rem;
     transition: background 0.15s ease;
 }
@@ -230,6 +343,43 @@
 .fmt-icono-btn:hover {
     background: #eaf1ff;
     color: #1e4fc4;
+}
+
+/* Columnas de iconos (Pdf/Cargas/Firma/Correo): angostas, centradas, y con ícono también
+   en el encabezado (en vez de texto en mayúsculas que no cabía y se montaba sobre la
+   columna vecina). El nombre de cada columna queda accesible via title/aria para lectores
+   de pantalla, sin ocupar espacio visual. */
+.fmt-tabla th.fmt-col-icono,
+.fmt-tabla td.fmt-col-icono {
+    width: 2.6rem;
+    min-width: 2.6rem;
+    max-width: 2.6rem;
+    padding-left: 0.2rem;
+    padding-right: 0.2rem;
+    text-align: center;
+}
+
+.fmt-tabla th.fmt-col-icono {
+    font-size: 0.85rem;
+    color: #2b6ff2;
+    cursor: help;
+}
+
+.fmt-tabla td.fmt-col-icono a,
+.fmt-tabla td.fmt-col-icono .fmt-icono-btn {
+    font-size: 0.85rem;
+}
+
+.fmt-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 /* Modal de gestión (equivalente al popup JuntasFormatoCntCO2.aspx del legado, migrado a un

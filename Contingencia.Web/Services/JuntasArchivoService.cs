@@ -5,22 +5,8 @@ public class JuntasArchivoService(IWebHostEnvironment entorno, IConfiguration co
 {
     private readonly string _directorioBase = Path.Combine(RutaAlmacenamiento.Base(configuracion, entorno.ContentRootPath), "mediauploader");
 
-    // Réplica del bloque "If cia = 'EPSS2468' Or cia = 'ESS024' Or ... Then cia =
-    // 'EPSS2468'" repetido 3 veces en JuntasCargueDoc.aspx.vb (y una vez más en
-    // JuntaProfesional.aspx.vb) — varias EPS comparten un mismo bucket de archivos.
-    // Ninguna de esas CIA es la que usa esta app (890330031, EPS Sanitas), así que nunca
-    // dispara para un usuario real de Contingencia hoy, pero se replica por si este mismo
-    // módulo llega a servir esas otras compañías más adelante.
-    private static readonly HashSet<string> CiasEnBucketCompartido =
-    [
-        "EPSS2468", "ESS024", "EPSS2405", "EPSS2408", "EPSS2413", "EPSS2415", "EPSS2420",
-        "EPSS2423", "EPSS2447", "EPSS2454", "EPSS2470", "EPSS2476", "EPSS2494",
-    ];
-
-    private static string NormalizarCia(string cia) => CiasEnBucketCompartido.Contains(cia) ? "EPSS2468" : cia;
-
     private string CarpetaCargue(string cia, string prescripcion) =>
-        Path.Combine(_directorioBase, NormalizarCia(Path.GetFileName(cia)), "JuntasP", Path.GetFileName(prescripcion));
+        Path.Combine(_directorioBase, JuntasBucketCompartido.Normalizar(Path.GetFileName(cia)), "JuntasP", Path.GetFileName(prescripcion));
 
     public IReadOnlyList<ArchivoCargue> Listar(string cia, string prescripcion)
     {
@@ -58,15 +44,31 @@ public class JuntasArchivoService(IWebHostEnvironment entorno, IConfiguration co
         return true;
     }
 
-    public string? RutaFisica(string cia, string prescripcion, string nombreArchivo)
+    public Task<Stream?> AbrirAsync(string cia, string prescripcion, string nombreArchivo)
     {
         var ruta = Path.Combine(CarpetaCargue(cia, prescripcion), Path.GetFileName(nombreArchivo));
-        return File.Exists(ruta) ? ruta : null;
+        Stream? contenido = File.Exists(ruta) ? File.OpenRead(ruta) : null;
+        return Task.FromResult(contenido);
     }
 
     public bool TieneArchivos(string cia, string prescripcion)
     {
         var carpeta = CarpetaCargue(cia, prescripcion);
         return Directory.Exists(carpeta) && Directory.EnumerateFiles(carpeta).Any();
+    }
+
+    public Task<HashSet<string>> ObtenerPrescripcionesConArchivosAsync(string cia, IEnumerable<string> prescripciones)
+    {
+        var carpetaCia = Path.Combine(_directorioBase, JuntasBucketCompartido.Normalizar(Path.GetFileName(cia)), "JuntasP");
+        if (!Directory.Exists(carpetaCia))
+        {
+            return Task.FromResult(new HashSet<string>());
+        }
+
+        var conArchivos = new DirectoryInfo(carpetaCia).GetDirectories()
+            .Where(d => d.EnumerateFiles().Any())
+            .Select(d => d.Name)
+            .ToHashSet();
+        return Task.FromResult(conArchivos);
     }
 }

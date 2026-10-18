@@ -48,6 +48,12 @@ public class MipresPrescripcion
 
 public class MipresDatosPrescripcion
 {
+    // Fecha de la prescripción (solo fecha, hora siempre 00:00:00 en esta API) — se combina
+    // con HPrescripcion (ver abajo) para la "Fecha y hora Expedición" del acta.
+    public string FPrescripcion { get; set; } = "";
+    // Pese al nombre (la "H" sugiere "Historia"), este campo trae la HORA real de la
+    // prescripción (ej. "12:31:53") — confirmado contra la API en vivo. El legado lo usaba
+    // por error como "Historia Clínica" (campo que esta API no expone en absoluto).
     public string HPrescripcion { get; set; } = "";
     public string CodHabIPS { get; set; } = "";
     public string NroIDIPS { get; set; } = "";
@@ -77,6 +83,9 @@ public class MipresMedicamento
     public string DescMedPrinAct { get; set; } = "";
     public string CodFF { get; set; } = "";
     public string Dosis { get; set; } = "";
+    // Unidad de medida de la Dosis (ej. "0168"→mg), campo separado que la API SIEMPRE
+    // entrega junto a Dosis — se traduce contra DQS_MIP_CRUZAR (Campo='DosisUM').
+    public string DosisUM { get; set; } = "";
     public string CodVA { get; set; } = "";
     public string NoFAdmon { get; set; } = "";
     public string CodFreAdmon { get; set; } = "";
@@ -120,6 +129,8 @@ public class MipresProductoNutricional
     // resuelve contra DQS_MIP_CRUZAR (Campo='DescProdNutr') — así lo usaba el legado.
     public string DescProdNutr { get; set; } = "";
     public string Dosis { get; set; } = "";
+    // Unidad de medida de la Dosis, mismo catálogo que Medicamentos (Campo='DosisUM').
+    public string DosisUM { get; set; } = "";
     public string CodViaAdmon { get; set; } = "";
     public string NoFAdmon { get; set; } = "";
     public string CodFreAdmon { get; set; } = "";

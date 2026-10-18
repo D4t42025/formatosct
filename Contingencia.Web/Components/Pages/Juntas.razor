@@ -95,12 +95,30 @@
 
     <div class="fmt-acciones">
         <button type="button" class="fmt-btn" disabled="@consultando" @onclick="ConsultarAsync">
-            <i class="fa-solid fa-magnifying-glass"></i> @(consultando ? "Consultando..." : "Consultar")
+            <i class="fa-solid fa-magnifying-glass"></i>
+            @(consultando
+                ? (diasTotales > 1
+                    ? $"Consultando... ({diasProcesados}/{diasTotales} · {segundosTranscurridos}s)"
+                    : $"Consultando... ({segundosTranscurridos}s)")
+                : "Consultar")
         </button>
         <button type="button" class="fmt-btn-secundario" disabled="@(exportando || resultados is null)" @onclick="ExportarAsync">
             <i class="fa-solid fa-file-excel"></i> @(exportando ? "Exportando..." : "Exportar a Excel")
         </button>
     </div>
+    @if (consultando && diasTotales > 1)
+    {
+        <p class="fmt-ayuda" style="margin-top:0.5rem">
+            Consultando la API de SISPRO día a día (@diasProcesados de @diasTotales) — los resultados aparecen a medida que llegan.
+        </p>
+    }
+    else if (consultando && segundosTranscurridos >= 4)
+    {
+        <p class="fmt-ayuda" style="margin-top:0.5rem">
+            La API del gobierno (SISPRO) puede tardar hasta ~30 segundos en responder un solo
+            día sin filtros adicionales — no es un bloqueo de esta aplicación, sigue en curso.
+        </p>
+    }
 </div>
 
 @if (resultados is not null)
@@ -108,7 +126,10 @@
     <div class="fmt-card" style="margin-top:1.25rem">
         @if (resultados.Count == 0)
         {
-            <p class="fmt-vacio">No se encontraron resultados con los criterios ingresados.</p>
+            @if (!consultando)
+            {
+                <p class="fmt-vacio">No se encontraron resultados con los criterios ingresados.</p>
+            }
         }
         else
         {
@@ -116,59 +137,79 @@
                 <table class="fmt-tabla">
                     <thead>
                         <tr>
-                            <th>Pdf Junta</th>
-                            <th>Cargas</th>
-                            <th>Firma</th>
-                            <th>Correo</th>
-                            <th>No Prescripción</th>
-                            <th>Fecha</th>
-                            <th>Tipo Tecnología</th>
-                            <th>Consecutivo</th>
-                            <th>Estado</th>
-                            <th>Cod Ent Proc</th>
-                            <th>Observaciones</th>
-                            <th>Justificación Técnica</th>
-                            <th>Modalidad</th>
-                            <th>No Acta</th>
-                            <th>Fecha Acta</th>
-                            <th>F Proceso</th>
-                            <th>Tipo Id Paciente</th>
-                            <th>Nro Id Paciente</th>
-                            <th>Cod Ent JM</th>
+                            <th class="fmt-col-icono" title="PDF del acta de junta">
+                                <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+                                <span class="fmt-visually-hidden">Pdf</span>
+                            </th>
+                            <th class="fmt-col-icono" title="Cargue de documentos">
+                                <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+                                <span class="fmt-visually-hidden">Cargas</span>
+                            </th>
+                            <th class="fmt-col-icono" title="Firma de profesionales">
+                                <i class="fa-solid fa-signature" aria-hidden="true"></i>
+                                <span class="fmt-visually-hidden">Firma</span>
+                            </th>
+                            <th class="fmt-col-icono" title="Enviar acta por correo">
+                                <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                                <span class="fmt-visually-hidden">Correo</span>
+                            </th>
+                            @foreach (var col in ColumnasOrdenables)
+                            {
+                                <th class="fmt-th-ordenable" @onclick="() => OrdenarPor(col.Clave)" title="Ordenar por @col.Texto">
+                                    @col.Texto
+                                    <i class="fa-solid @IconoOrden(col.Clave)" aria-hidden="true"></i>
+                                </th>
+                            }
                         </tr>
                     </thead>
                     <tbody>
                         @foreach (var f in FilasPagina)
                         {
-                            <tr>
-                                <td>
+                            <tr @key="@($"{f.NoPrescripcion}|{f.FPrescripcion}|{f.Consecutivo}")">
+                                <td class="fmt-col-icono">
                                     <a href="@UrlActa(f)" target="_blank" title="Ver acta en PDF">
                                         <i class="fa-solid fa-file-pdf"></i>
                                     </a>
                                 </td>
-                                <td>
+                                <td class="fmt-col-icono">
                                     <button type="button" class="fmt-icono-btn" title="Cargas" @onclick="() => AbrirModalCargas(f)">
-                                        <i class="fa-solid @(JuntasArchivoService.TieneArchivos(cia, f.NoPrescripcion) ? "fa-check-double" : "fa-cloud-arrow-up")"></i>
+                                        <i class="fa-solid @(prescripcionesConArchivos.Contains(f.NoPrescripcion) ? "fa-check-double" : "fa-cloud-arrow-up")"></i>
                                     </button>
                                 </td>
-                                <td>
+                                <td class="fmt-col-icono">
                                     <button type="button" class="fmt-icono-btn" title="Firma" @onclick="() => AbrirModalFirma(f)">
                                         <i class="fa-solid fa-signature"></i>
                                     </button>
                                 </td>
-                                <td>
+                                <td class="fmt-col-icono">
                                     <button type="button" class="fmt-icono-btn" title="Enviar acta por correo" @onclick="() => AbrirModalCorreo(f)">
                                         <i class="fa-solid fa-paper-plane"></i>
                                     </button>
                                 </td>
                                 <td>@f.NoPrescripcion</td>
                                 <td>@f.FPrescripcion</td>
-                                <td>@f.TipoTecnologia</td>
+                                <td>
+                                    @{
+                                        var tec = InfoTipoTecnologia(f.TipoTecnologia);
+                                    }
+                                    <span class="fmt-chip-tecnologia fmt-chip-@tec.Clase">
+                                        <i class="fa-solid @tec.Icono" aria-hidden="true"></i>
+                                        @tec.Texto
+                                    </span>
+                                </td>
                                 <td>@f.Consecutivo</td>
-                                <td><span class="fmt-estado">@TraducirEstado(f.EstJM)</span></td>
+                                <td>
+                                    @{
+                                        var est = InfoEstado(f.EstJM);
+                                    }
+                                    <span class="fmt-chip-tecnologia fmt-chip-@est.Clase">
+                                        <i class="fa-solid @est.Icono" aria-hidden="true"></i>
+                                        @est.Texto
+                                    </span>
+                                </td>
                                 <td>@f.CodEntProc</td>
-                                <td>@f.Observaciones</td>
-                                <td>@f.JustificacionTecnica</td>
+                                <td class="fmt-col-texto-largo" title="@f.Observaciones">@f.Observaciones</td>
+                                <td class="fmt-col-texto-largo" title="@f.JustificacionTecnica">@f.JustificacionTecnica</td>
                                 <td>@f.Modalidad</td>
                                 <td>@f.NoActa</td>
                                 <td>@f.FechaActa</td>
@@ -400,10 +441,50 @@
     private bool consultando;
     private bool exportando;
 
+    // Progreso de la consulta (días/prescripciones ya resueltos vs. el total) — la API de
+    // SISPRO responde una llamada a la vez por día (300ms a 30s cada una, fuera de nuestro
+    // control), así que para un rango largo (ej. un mes) mostramos avance real en vez de
+    // dejar al usuario mirando un botón fijo "Consultando..." sin información.
+    private int diasProcesados;
+    private int diasTotales;
+
+    // Cronómetro visible mientras "consultando" está activo: para una consulta de un solo día
+    // sin filtros (el peor caso: una sola llamada HTTP obligatoria, sin nada que paralelizar)
+    // diasTotales nunca pasa de 1, así que sin esto el usuario solo ve "Consultando..." fijo
+    // sin ninguna señal de que sigue avanzando. Se incrementa cada segundo via un ticker en
+    // segundo plano mientras dura la consulta.
+    private int segundosTranscurridos;
+    private CancellationTokenSource? tickerCts;
+
+    private async Task TickerProgresoAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(1000, token);
+                await InvokeAsync(() =>
+                {
+                    segundosTranscurridos++;
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // Normal: se cancela en el finally de ConsultarAsync al terminar.
+        }
+    }
+
     private string cia = "";
     private bool tokenIps;
 
     private List<JuntaProfesionalDetalle>? resultados;
+
+    // Set en memoria de prescripciones (de la página actual de resultados) que ya tienen
+    // archivos cargados — se calcula una sola vez por consulta (ObtenerPrescripcionesConArchivosAsync)
+    // en vez de una llamada a almacenamiento por fila (ver nota en IJuntasArchivoService).
+    private HashSet<string> prescripcionesConArchivos = [];
 
     // Paginación en memoria (todos los resultados ya están cargados desde ConsultarAsync) —
     // la grilla completa sin paginar quedaba muy larga para rangos de varios días.
@@ -411,9 +492,108 @@
     private int paginaActual = 1;
     private int TotalPaginas => resultados is null or { Count: 0 } ? 1 : (int)Math.Ceiling(resultados.Count / (double)TamanioPagina);
     private IEnumerable<JuntaProfesionalDetalle> FilasPagina =>
-        resultados?.Skip((paginaActual - 1) * TamanioPagina).Take(TamanioPagina) ?? [];
+        ResultadosOrdenados.Skip((paginaActual - 1) * TamanioPagina).Take(TamanioPagina);
 
     private void IrAPagina(int pagina) => paginaActual = Math.Clamp(pagina, 1, TotalPaginas);
+
+    // Ordenamiento por encabezado: clic ordena ascendente, un segundo clic sobre la misma
+    // columna invierte a descendente, clic en otra columna reinicia a ascendente. Se
+    // reutilizan los mismos textos ya traducidos (Tipo Tecnología/Estado) para que el orden
+    // alfabético sea el que el usuario ve en pantalla, no el código crudo subyacente.
+    private static readonly (string Clave, string Texto)[] ColumnasOrdenables =
+    [
+        ("NoPrescripcion", "No Prescripción"),
+        ("FPrescripcion", "Fecha"),
+        ("TipoTecnologia", "Tipo Tecnología"),
+        ("Consecutivo", "Consecutivo"),
+        ("EstJM", "Estado"),
+        ("CodEntProc", "Cod Ent Proc"),
+        ("Observaciones", "Observaciones"),
+        ("JustificacionTecnica", "Justificación Técnica"),
+        ("Modalidad", "Modalidad"),
+        ("NoActa", "No Acta"),
+        ("FechaActa", "Fecha Acta"),
+        ("FProceso", "F Proceso"),
+        ("TipoIDPaciente", "Tipo Id Paciente"),
+        ("NroIDPaciente", "Nro Id Paciente"),
+        ("CodEntJM", "Cod Ent JM"),
+    ];
+
+    private static readonly Dictionary<string, Func<JuntaProfesionalDetalle, string>> SelectoresOrden = new()
+    {
+        ["NoPrescripcion"] = f => f.NoPrescripcion,
+        ["FPrescripcion"] = f => f.FPrescripcion,
+        ["TipoTecnologia"] = f => InfoTipoTecnologia(f.TipoTecnologia).Texto,
+        ["Consecutivo"] = f => f.Consecutivo,
+        ["EstJM"] = f => InfoEstado(f.EstJM).Texto,
+        ["CodEntProc"] = f => f.CodEntProc,
+        ["Observaciones"] = f => f.Observaciones,
+        ["JustificacionTecnica"] = f => f.JustificacionTecnica,
+        ["Modalidad"] = f => f.Modalidad,
+        ["NoActa"] = f => f.NoActa,
+        ["FechaActa"] = f => f.FechaActa,
+        ["FProceso"] = f => f.FProceso,
+        ["TipoIDPaciente"] = f => f.TipoIDPaciente,
+        ["NroIDPaciente"] = f => f.NroIDPaciente,
+        ["CodEntJM"] = f => f.CodEntJM,
+    };
+
+    private string? ordenColumna;
+    private bool ordenAscendente = true;
+
+    private void OrdenarPor(string columna)
+    {
+        if (ordenColumna == columna)
+        {
+            ordenAscendente = !ordenAscendente;
+        }
+        else
+        {
+            ordenColumna = columna;
+            ordenAscendente = true;
+        }
+
+        paginaActual = 1;
+    }
+
+    private string IconoOrden(string columna) =>
+        ordenColumna != columna ? "fa-sort" : (ordenAscendente ? "fa-sort-up" : "fa-sort-down");
+
+    private IEnumerable<JuntaProfesionalDetalle> ResultadosOrdenados
+    {
+        get
+        {
+            if (resultados is null) return [];
+            if (ordenColumna is null || !SelectoresOrden.TryGetValue(ordenColumna, out var selector)) return resultados;
+
+            return ordenAscendente
+                ? resultados.OrderBy(selector, OrdenNaturalComparer.Instancia)
+                : resultados.OrderByDescending(selector, OrdenNaturalComparer.Instancia);
+        }
+    }
+
+    // Comparer "natural": números y fechas (vienen como texto desde la API) se comparan por
+    // su valor real en vez de alfabéticamente (p.ej. "10" antes que "9", o fechas en orden
+    // cronológico real) — si ninguno de los dos valores parsea, cae a comparación de texto.
+    private sealed class OrdenNaturalComparer : IComparer<string>
+    {
+        public static readonly OrdenNaturalComparer Instancia = new();
+
+        public int Compare(string? x, string? y)
+        {
+            x ??= "";
+            y ??= "";
+
+            if (decimal.TryParse(x, out var nx) && decimal.TryParse(y, out var ny))
+                return nx.CompareTo(ny);
+
+            if (DateTime.TryParse(x, out var dx) && DateTime.TryParse(y, out var dy))
+                return dx.CompareTo(dy);
+
+            return string.Compare(x, y, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
 
     // ---- Modal "Cargas" ----
     private bool mostrarModalCargas;
@@ -469,19 +649,52 @@
     private async Task ConsultarAsync()
     {
         consultando = true;
+        resultados = [];
+        paginaActual = 1;
+        prescripcionesConArchivos = [];
+        diasProcesados = 0;
+        diasTotales = 0;
+        segundosTranscurridos = 0;
+        tickerCts = new CancellationTokenSource();
+        _ = TickerProgresoAsync(tickerCts.Token);
         try
         {
             var resultado = await JuntasService.ConsultarAsync(
                 cia, regimen, tokenIps,
                 DateTime.Parse(fechaInicio), DateTime.Parse(fechaFin), estado,
-                noPrescripcion, tipoDoc, numDoc);
+                noPrescripcion, tipoDoc, numDoc,
+                onProgreso: async (parcial, completadas, total) =>
+                {
+                    // Se dispara desde las tareas en paralelo (hilos del pool) — InvokeAsync
+                    // marshalea de vuelta al hilo del circuito de Blazor antes de tocar el
+                    // estado del componente, para que pintar la grilla a medida que llegan
+                    // resultados no choque con el renderizado normal.
+                    await InvokeAsync(() =>
+                    {
+                        if (parcial.Count > 0)
+                        {
+                            resultados!.AddRange(parcial);
+                        }
 
+                        diasProcesados = completadas;
+                        diasTotales = total;
+                        StateHasChanged();
+                    });
+                });
+
+            // Reemplazo final: mismo contenido que lo acumulado en vivo (ObtenerPrescripcionesConArchivosAsync
+            // necesita la lista completa y definitiva, no el orden de llegada parcial).
             resultados = resultado.Filas.ToList();
             paginaActual = 1;
+            prescripcionesConArchivos = await JuntasArchivoService.ObtenerPrescripcionesConArchivosAsync(
+                cia, resultados.Select(f => f.NoPrescripcion));
         }
         finally
         {
             consultando = false;
+            tickerCts?.Cancel();
+            tickerCts?.Dispose();
+            tickerCts = null;
         }
     }
 
@@ -516,7 +729,7 @@
                 // La API deja varios campos en null (acta sin asignar, etc.) — DataRow no
                 // acepta null crudo (tira ArgumentNullException), hay que pasar DBNull.Value
                 // explícitamente. Esto es lo que hacía fallar el export en silencio.
-                tabla.Rows.Add(N(f.NoPrescripcion), N(f.FPrescripcion), N(f.TipoTecnologia), N(f.Consecutivo), N(f.EstJM),
+                tabla.Rows.Add(N(f.NoPrescripcion), N(f.FPrescripcion), N(InfoTipoTecnologia(f.TipoTecnologia).Texto), N(f.Consecutivo), N(InfoEstado(f.EstJM).Texto),
                     N(f.CodEntProc), N(f.Observaciones), N(f.JustificacionTecnica), N(f.Modalidad), N(f.NoActa), N(f.FechaActa),
                     N(f.FProceso), N(f.TipoIDPaciente), N(f.NroIDPaciente), N(f.CodEntJM));
             }
@@ -540,16 +753,34 @@
 
     private static object N(string? valor) => (object?)valor ?? DBNull.Value;
 
-    private static string UrlActa(JuntaProfesionalDetalle f) =>
-        $"/api/juntas/acta?prescripcion={Escapar(f.NoPrescripcion)}";
+    private string UrlActa(JuntaProfesionalDetalle f) =>
+        $"/api/juntas/acta?prescripcion={Escapar(f.NoPrescripcion)}&regimen={Escapar(regimen)}";
 
-    private static string TraducirEstado(string codigo) => codigo switch
+    // Chip reutilizable para columnas de catálogo corto (Tipo Tecnología, Estado): texto
+    // completo + ícono + clase de color, mismo patrón visual en ambas columnas.
+    private readonly record struct ChipInfo(string Texto, string Icono, string Clase);
+
+    private static ChipInfo InfoTipoTecnologia(string codigo) => codigo?.Trim().ToUpperInvariant() switch
     {
-        "1" => "No requiere junta",
-        "2" => "Pendiente evaluación",
-        "3" => "Aprobada",
-        "4" => "No aprobada",
-        _ => codigo,
+        "M" => new("Medicamentos", "fa-pills", "medicamentos"),
+        "N" => new("Nutricionales", "fa-apple-whole", "nutricionales"),
+        "P" => new("Procedimientos", "fa-stethoscope", "procedimientos"),
+        "D" => new("Dispositivos", "fa-crutch", "dispositivos"),
+        "S" => new("Servicios", "fa-hand-holding-medical", "servicios"),
+        _ => new(codigo ?? "", "fa-circle-question", "desconocido"),
+    };
+
+    // Estado (EstJM) llegaba como texto plano siempre con el mismo azul genérico
+    // ("fmt-estado") — ahora cada estado tiene su propio color + ícono para distinguirse de
+    // un vistazo: pendiente (amarillo/reloj), aprobada (verde/check), no aprobada
+    // (rojo/equis), no requiere junta (gris/info).
+    private static ChipInfo InfoEstado(string codigo) => codigo switch
+    {
+        "1" => new("No requiere junta", "fa-circle-info", "no-requiere"),
+        "2" => new("Pendiente evaluación", "fa-hourglass-half", "pendiente"),
+        "3" => new("Aprobada", "fa-circle-check", "aprobada"),
+        "4" => new("No aprobada", "fa-circle-xmark", "no-aprobada"),
+        _ => new(codigo, "fa-circle-question", "desconocido"),
     };
 
     // ---- Modal "Cargas" ----
@@ -604,6 +835,10 @@
             mensajeCargue = $"{archivosSeleccionados.Count} archivo(s) cargado(s) correctamente.";
             archivosSeleccionados = [];
             archivosCargue = JuntasArchivoService.Listar(cia, filaCargas.NoPrescripcion);
+            if (archivosCargue.Count > 0)
+            {
+                prescripcionesConArchivos.Add(filaCargas.NoPrescripcion);
+            }
         }
         finally
         {
@@ -620,6 +855,10 @@
 
         JuntasArchivoService.Eliminar(cia, filaCargas.NoPrescripcion, nombreArchivo);
         archivosCargue = JuntasArchivoService.Listar(cia, filaCargas.NoPrescripcion);
+        if (archivosCargue.Count == 0)
+        {
+            prescripcionesConArchivos.Remove(filaCargas.NoPrescripcion);
+        }
     }
 
     // ---- Modal "Firma" ----
@@ -753,7 +992,7 @@
             byte[] pdf;
             try
             {
-                pdf = await JuntasService.GenerarActaPdfAsync(cia, tokenIps, filaCorreo.NoPrescripcion);
+                pdf = await JuntasService.GenerarActaPdfAsync(cia, tokenIps, filaCorreo.NoPrescripcion, regimen);
                 await using var stream = new MemoryStream(pdf);
                 await JuntasArchivoService.GuardarAsync(cia, filaCorreo.NoPrescripcion, nombreArchivo, stream);
             }
