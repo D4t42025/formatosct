@@ -1497,7 +1497,7 @@ residual).
 ### 32.2. Diseño
 
 - **Misma cuenta y mismo contenedor de Azure que Formatos** (gitsanitas /
-  ormatosct, mismo Almacenamiento:Azure:ConnectionString ya configurado vía
+  formatosct, mismo Almacenamiento:Azure:ConnectionString ya configurado vía
   dotnet user-secrets) — no se crea una cuenta ni contenedor nuevo, solo una
   carpeta distinta dentro del mismo contenedor:
   `
@@ -1507,7 +1507,7 @@ residual).
 - **Enrutado dinámico por CIA**, igual patrón que Formatos: lista de CIAs en
   Almacenamiento:Azure:CiasContingenciasAzure (config), con fallback
   hardcodeado a ["890330031"] si la clave no existe (mismo criterio que
-  CiasFormatosAzure, que tampoco está en ppsettings.json — depende del
+  CiasFormatosAzure, que tampoco está en appsettings.json — depende del
   default). Cualquier CIA no listado sigue en disco sin cambios.
 - Diferencia de forma respecto a Formatos: IContingenciaArchivoService no
   recibe cia explícito en GuardarAsync/Existe/Eliminar/AbrirAsync (solo
@@ -1545,7 +1545,7 @@ ull si no.
     ContingenciaArchivoService).
   - /api/contingencias/formulario: la lectura de la firma para el PDF pasó de
     File.ReadAllBytesAsync(archivoService.RutaFisica(...)) a
-    rchivoService.AbrirAsync(...) + copiar a MemoryStream — funciona igual
+    archivoService.AbrirAsync(...) + copiar a MemoryStream — funciona igual
     venga de disco o de Azure.
   - /api/contingencias/archivo: la descarga de soportes/firma pasó de
     Results.File(rutaFisica, contentType) a
@@ -1557,24 +1557,24 @@ ull si no.
 - dotnet build sobre toda la solución → 0 errores (mismas advertencias
   preexistentes de siempre, ninguna nueva).
 - **Prueba funcional real contra Azure** (proyecto de consola temporal, cuenta
-  gitsanitas, contenedor ormatosct, usando el mismo ConnectionString
+  gitsanitas, contenedor formatosct, usando el mismo ConnectionString
   configurado en dotnet user-secrets del proyecto — proyecto de prueba
   borrado al terminar):
   1. Subida de un blob de prueba a 890330031/Contingencias/TEST_SANITY_CHECK_2026/soporte_1.txt
-     → Existe = 	rue.
+     → Existe = True.
   2. Descarga y verificación de contenido → texto esperado leído correctamente.
-  3. Borrado (DeleteIfExists) → 	rue; Existe tras borrar → alse.
+  3. Borrado (DeleteIfExists) → True; Existe tras borrar → False.
   4. Confirmado que el prefijo de Contingencias (890330031/Contingencias/...)
      es distinto al de Formatos (890330031/Formatos/...) dentro del mismo
      contenedor — no hay cruce de documentos entre ambos flujos.
 
 ### 32.5. Qué NO cambió
 
-- La cuenta/contenedor de Azure: se reutiliza gitsanitas/ormatosct, no se
+- La cuenta/contenedor de Azure: se reutiliza gitsanitas/formatosct, no se
   creó infraestructura nueva.
 - El comportamiento para CIAs distintos de 890330031: siguen 100% en disco,
   tanto en Formatos como en Nueva Contingencia, sin ningún cambio.
-- ppsettings.json/ppsettings.Development.json: no se agregó la clave
+- appsettings.json/appsettings.Development.json: no se agregó la clave
   CiasContingenciasAzure a ningún archivo (igual que CiasFormatosAzure
   tampoco está ahí) — el selector usa el fallback hardcodeado ["890330031"]
   mientras no se configure explícitamente.
@@ -1608,11 +1608,11 @@ ull si no.
   migración inicial completa como para las sincronizaciones diarias
   siguientes, sin lógica propia de fechas).
 - Mismo destino lógico ya usado por FormatosArchivoServiceAzure.cs: cuenta
-  gitsanitas, contenedor **ormatosct** (el mismo que ya usa el enrutado
+  gitsanitas, contenedor **formatosct** (el mismo que ya usa el enrutado
   dinámico de Formatos en la app nueva — sección 13), carpeta
   {cia}/Formatos/{radicado}{extensión}.
 - **SAS distinto al de Juntas**: aunque es la misma cuenta de Azure, el SAS
-  debe generarse específicamente **desde dentro del contenedor ormatosct**
+  debe generarse específicamente **desde dentro del contenedor formatosct**
   (no reutilizar el SAS de juntas, que no tiene permisos sobre este
   contenedor). Variable de entorno de usuario: AZCOPY_FORMATOS_SAS
   (análoga a AZCOPY_JUNTAS_SAS).
@@ -1627,55 +1627,59 @@ ull si no.
   - Lee AZCOPY_FORMATOS_SAS; valida que la URL contenga /formatosct antes
     del ? (si no, el SAS fue generado desde la cuenta completa en vez de
     desde el contenedor — mismo error ya visto y corregido en Juntas).
-  - Resuelve zcopy.exe vía PATH o, si no está, junto al script
+  - Resuelve azcopy.exe vía PATH o, si no está, junto al script
     ($PSScriptRoot\azcopy.exe) — mismo fallback ya corregido en Juntas.
   - Inserta /890330031/Formatos en la URL de destino antes del ?.
-  - zcopy sync <origen> <destino> --recursive=true (+ --delete-destination=true
+  - azcopy sync <origen> <destino> --recursive=true (+ --delete-destination=true
     con -Borrar), log en logs-migracion-formatos\sync-<timestamp>.log.
   - Sintaxis validada con el parser de PowerShell antes de entregarlo (sin
     errores).
 
-### 33.4. Pasos pendientes para el usuario (en el servidor legado)
+### 33.4. Pasos ejecutados por el usuario (en el servidor legado)
 
 Mismo procedimiento ya documentado y probado con Juntas (sección 22),
 aplicado ahora a Formatos:
 
-1. Crear una carpeta en el servidor legado, p. ej. C:\MigracionFormatos, y
-   copiar ahí Migrar-FormatosAzure.ps1 + zcopy.exe (puede reusarse el
-   mismo zcopy.exe ya descargado para Juntas).
-2. En el Portal de Azure: ir a la cuenta gitsanitas → **Almacenamiento de
-   datos → Contenedores** → seleccionar el contenedor **ormatosct**
-   (checkbox, no "Explorador de almacenamiento") → botón **"Generar SAS"** →
-   marcar **Lectura + Escritura + Listado + Creación**, expiración ~1 año →
-   copiar la "URL de SAS de Blob" (debe empezar
-   https://gitsanitas.blob.core.windows.net/formatosct?...).
-3. Crear la variable de entorno de **usuario** AZCOPY_FORMATOS_SAS con esa
-   URL (Propiedades del sistema → Variables de entorno → Variables de
-   usuario) y **cerrar todas las ventanas de PowerShell abiertas** antes de
-   continuar (lección aprendida en Juntas: una terminal ya abierta no ve la
-   variable nueva).
-4. Abrir una terminal **nueva**, verificar $env:AZCOPY_FORMATOS_SAS, entrar
-   a C:\MigracionFormatos y ejecutar .\Migrar-FormatosAzure.ps1 (primera
-   corrida = migración completa de todo lo histórico).
-5. Una vez confirmada la corrida completa exitosa (0 fallos), programar una
-   tarea diaria igual que MigracionJuntasAzure (mismo comando
-   Register-ScheduledTask, cambiando el nombre a MigracionFormatosAzure y
-   el script a Migrar-FormatosAzure.ps1), en el horario que el usuario
-   prefiera.
-6. Al momento del corte final (cuando la app legada deje de usarse), quitar
-   la tarea programada con Unregister-ScheduledTask.
+1. Carpeta creada en el servidor legado con el script + azcopy.exe (puede
+   reusarse el mismo azcopy.exe ya descargado para Juntas).
+2. SAS generado desde el Portal de Azure, dentro del contenedor **formatosct**
+   (Lectura + Escritura + Listado + Creación, expiración ~1 año), guardado
+   como variable de entorno de **usuario** AZCOPY_FORMATOS_SAS, y terminal
+   nueva abierta (lección aprendida en Juntas: una terminal ya abierta no ve
+   la variable nueva).
+3. **Migración inicial completa ejecutada con éxito el 18-oct-2026**
+   ("ya finalizo la carga exitosamente"). La terminal se cerró antes de
+   capturar las cifras exactas (archivos/tamaño/duración/fallos); el detalle
+   completo queda disponible en el log que el propio script genera en
+   logs-migracion-formatos\sync-<timestamp>.log, en la misma carpeta del
+   servidor legado, por si se necesita revisar después.
+4. **Tarea programada diaria creada**: "MigracionFormatosAzure", a las
+   **22:00 (10:00 p.m.)**, mismo patrón que MigracionJuntasAzure:
 
-### 33.5. Qué NO se ha hecho todavía
+```powershell
+$accion = New-ScheduledTaskAction -Execute "powershell.exe" -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\MigracionFormatos\Migrar-FormatosAzure.ps1"'
+$disparador = New-ScheduledTaskTrigger -Daily -At "22:00"
+Register-ScheduledTask -TaskName "MigracionFormatosAzure" -Action $accion -Trigger $disparador -User "Administrator" -RunLevel Highest -Description "Sincroniza diariamente los archivos de Formatos hacia Azure Blob Storage"
+```
 
-- [ ] El SAS de ormatosct aún no se ha generado ni guardado como
-  AZCOPY_FORMATOS_SAS en el servidor legado.
-- [ ] La migración inicial completa no se ha ejecutado todavía (pendiente de
-  que el usuario corra el script en el servidor legado).
-- [ ] La tarea programada diaria (MigracionFormatosAzure) no se ha creado.
-- [ ] Verificar en el Portal de Azure (o Storage Explorer) que, tras la
-  primera corrida, los blobs aparezcan bajo ormatosct/890330031/Formatos/...
-  y no se mezclen con los que ya sube la app nueva en producción desde el
-  mismo prefijo (mismo radicado = mismo nombre de blob = AzCopy lo trataría
-  como "ya existe"/lo sobreescribiría si cambia fecha/tamaño; en teoría no
-  debería haber colisión real porque son radicados distintos, pero vale la
-  pena revisar al terminar la primera corrida completa).
+(Ajustar la ruta "C:\MigracionFormatos\..." si el script quedó guardado en
+otra carpeta del servidor legado.)
+
+El día del corte final (legado apagado), eliminarla con:
+```powershell
+Unregister-ScheduledTask -TaskName "MigracionFormatosAzure" -Confirm:$false
+```
+
+### 33.5. Estado final
+
+- [x] SAS de formatosct generado y guardado como AZCOPY_FORMATOS_SAS.
+- [x] Migración inicial completa ejecutada sin errores reportados por el
+  usuario (18-oct-2026).
+- [ ] Tarea programada diaria: comando entregado arriba (22:00), pendiente
+  de confirmar en el servidor legado con
+  Get-ScheduledTask -TaskName "MigracionFormatosAzure".
+- [ ] Verificar en el Portal de Azure (o Storage Explorer) que los blobs
+  aparezcan bajo formatosct/890330031/Formatos/... y no se mezclen con los
+  que ya sube la app nueva en producción desde el mismo prefijo (mismo
+  radicado = mismo nombre de blob; en teoría no debería haber colisión real
+  porque son radicados distintos, pero vale la pena revisar).
