@@ -1583,3 +1583,99 @@ ull si no.
   sigue llamando a ArchivoService.Eliminar(ruta) tal cual — ahora ese método,
   al pasar por el selector, también elimina el blob de Azure si el CIA
   corresponde, sin cambios en el Razor.
+
+
+## 33. Migración masiva de Formatos legados a Azure Blob Storage (mismo proceso que Juntas, 18-oct-2026)
+
+### 33.1. Pedido
+
+- **"por ultimo el mismo proceso de migracion del servidor 168 de juntas al
+  azure masivo que hicimos hay que hacerlo tambien para formatos"** — replicar
+  para Formatos exactamente el proceso ya ejecutado con éxito para Juntas
+  (sección 22): migración masiva ("corte de hoy") de los documentos ya
+  cargados en el servidor legado imperiumsanitas.net.co hacia Azure Blob
+  Storage, más sincronización diaria incremental mientras ambas apps corran
+  en paralelo.
+- Ruta de origen confirmada por el usuario:
+  `C:\Inetpub\vhosts\imperiumsanitas.net.co\httpdocs\MediaUploader\Formatos\890330031`
+  — **ojo**: el orden de carpetas es distinto al de Juntas (que era
+  `MediaUploader\{CIA}\JuntasP`); en Formatos es
+  `MediaUploader\Formatos\{CIA}`.
+
+### 33.2. Diseño (idéntico al de Juntas, mismo mecanismo)
+
+- Mismo mecanismo: **AzCopy sync** (una sola corrida sirve tanto para la
+  migración inicial completa como para las sincronizaciones diarias
+  siguientes, sin lógica propia de fechas).
+- Mismo destino lógico ya usado por FormatosArchivoServiceAzure.cs: cuenta
+  gitsanitas, contenedor **ormatosct** (el mismo que ya usa el enrutado
+  dinámico de Formatos en la app nueva — sección 13), carpeta
+  {cia}/Formatos/{radicado}{extensión}.
+- **SAS distinto al de Juntas**: aunque es la misma cuenta de Azure, el SAS
+  debe generarse específicamente **desde dentro del contenedor ormatosct**
+  (no reutilizar el SAS de juntas, que no tiene permisos sobre este
+  contenedor). Variable de entorno de usuario: AZCOPY_FORMATOS_SAS
+  (análoga a AZCOPY_JUNTAS_SAS).
+- Único CIA con Formatos legados hoy: 890330031 (Sanitas) — igual que
+  Juntas.
+
+### 33.3. Script creado
+
+- **Despliegue\Migrar-FormatosAzure.ps1** (nuevo, en el repo) — calco de
+  Migrar-JuntasAzure.ps1 adaptado a Formatos:
+  - Origen fijo: `...\MediaUploader\Formatos\890330031`.
+  - Lee AZCOPY_FORMATOS_SAS; valida que la URL contenga /formatosct antes
+    del ? (si no, el SAS fue generado desde la cuenta completa en vez de
+    desde el contenedor — mismo error ya visto y corregido en Juntas).
+  - Resuelve zcopy.exe vía PATH o, si no está, junto al script
+    ($PSScriptRoot\azcopy.exe) — mismo fallback ya corregido en Juntas.
+  - Inserta /890330031/Formatos en la URL de destino antes del ?.
+  - zcopy sync <origen> <destino> --recursive=true (+ --delete-destination=true
+    con -Borrar), log en logs-migracion-formatos\sync-<timestamp>.log.
+  - Sintaxis validada con el parser de PowerShell antes de entregarlo (sin
+    errores).
+
+### 33.4. Pasos pendientes para el usuario (en el servidor legado)
+
+Mismo procedimiento ya documentado y probado con Juntas (sección 22),
+aplicado ahora a Formatos:
+
+1. Crear una carpeta en el servidor legado, p. ej. C:\MigracionFormatos, y
+   copiar ahí Migrar-FormatosAzure.ps1 + zcopy.exe (puede reusarse el
+   mismo zcopy.exe ya descargado para Juntas).
+2. En el Portal de Azure: ir a la cuenta gitsanitas → **Almacenamiento de
+   datos → Contenedores** → seleccionar el contenedor **ormatosct**
+   (checkbox, no "Explorador de almacenamiento") → botón **"Generar SAS"** →
+   marcar **Lectura + Escritura + Listado + Creación**, expiración ~1 año →
+   copiar la "URL de SAS de Blob" (debe empezar
+   https://gitsanitas.blob.core.windows.net/formatosct?...).
+3. Crear la variable de entorno de **usuario** AZCOPY_FORMATOS_SAS con esa
+   URL (Propiedades del sistema → Variables de entorno → Variables de
+   usuario) y **cerrar todas las ventanas de PowerShell abiertas** antes de
+   continuar (lección aprendida en Juntas: una terminal ya abierta no ve la
+   variable nueva).
+4. Abrir una terminal **nueva**, verificar $env:AZCOPY_FORMATOS_SAS, entrar
+   a C:\MigracionFormatos y ejecutar .\Migrar-FormatosAzure.ps1 (primera
+   corrida = migración completa de todo lo histórico).
+5. Una vez confirmada la corrida completa exitosa (0 fallos), programar una
+   tarea diaria igual que MigracionJuntasAzure (mismo comando
+   Register-ScheduledTask, cambiando el nombre a MigracionFormatosAzure y
+   el script a Migrar-FormatosAzure.ps1), en el horario que el usuario
+   prefiera.
+6. Al momento del corte final (cuando la app legada deje de usarse), quitar
+   la tarea programada con Unregister-ScheduledTask.
+
+### 33.5. Qué NO se ha hecho todavía
+
+- [ ] El SAS de ormatosct aún no se ha generado ni guardado como
+  AZCOPY_FORMATOS_SAS en el servidor legado.
+- [ ] La migración inicial completa no se ha ejecutado todavía (pendiente de
+  que el usuario corra el script en el servidor legado).
+- [ ] La tarea programada diaria (MigracionFormatosAzure) no se ha creado.
+- [ ] Verificar en el Portal de Azure (o Storage Explorer) que, tras la
+  primera corrida, los blobs aparezcan bajo ormatosct/890330031/Formatos/...
+  y no se mezclen con los que ya sube la app nueva en producción desde el
+  mismo prefijo (mismo radicado = mismo nombre de blob = AzCopy lo trataría
+  como "ya existe"/lo sobreescribiría si cambia fecha/tamaño; en teoría no
+  debería haber colisión real porque son radicados distintos, pero vale la
+  pena revisar al terminar la primera corrida completa).
