@@ -1675,9 +1675,13 @@ Unregister-ScheduledTask -TaskName "MigracionFormatosAzure" -Confirm:$false
 - [x] SAS de formatosct generado y guardado como AZCOPY_FORMATOS_SAS.
 - [x] Migración inicial completa ejecutada sin errores reportados por el
   usuario (18-oct-2026).
-- [ ] Tarea programada diaria: comando entregado arriba (22:00), pendiente
-  de confirmar en el servidor legado con
-  Get-ScheduledTask -TaskName "MigracionFormatosAzure".
+- [x] Tarea programada diaria creada y **verificada funcionando**: primera
+  corrida automática confirmada el 18-oct-2026 a las 22:00, con
+  `Get-ScheduledTaskInfo -TaskName "MigracionFormatosAzure"` reportando
+  `LastTaskResult: 0` (éxito) y `NumberOfMissedRuns: 0`. Misma verificación
+  hecha en paralelo para Juntas: `MigracionJuntasAzure` corrió a las 21:30,
+  también `LastTaskResult: 0`. Ambas tareas quedan agendadas día a día sin
+  intervención manual.
 - [ ] Verificar en el Portal de Azure (o Storage Explorer) que los blobs
   aparezcan bajo formatosct/890330031/Formatos/... y no se mezclen con los
   que ya sube la app nueva en producción desde el mismo prefijo (mismo
