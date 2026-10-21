@@ -1,6 +1,7 @@
-﻿-- 02_ProcedimientosAlmacenados.sql - 34 SP que usa la app (sp_DQS_ConsultaFiltros va aparte, version delgada, en 02b_ProcedimientoFiltrosDelgado.sql)
+﻿-- 02_ProcedimientosAlmacenados.sql - 36 SP que usa la app (sp_DQS_ConsultaFiltros va aparte, version delgada, en 02b_ProcedimientoFiltrosDelgado.sql)
 -- Generado el 2026-10-14 desde DQUALITYREC (172.25.2.15,1435) por catalogo del sistema.
 -- Idempotente: se puede ejecutar varias veces. Ejecutar con la base destino seleccionada (USE <base>).
+-- 2026-10-21: se agregaron sp_MIP_EliminaFormatoCnt y sp_MIP_EliminaContingencia (scripts 014 y 015, ya aplicados en FormatosCT el 2026-10-18).
 
 SET NOCOUNT ON;
 GO
@@ -1500,3 +1501,63 @@ BEGIN
 END
 GO
 
+-- ---------------------------------------------------------------- sp_MIP_EliminaFormatoCnt
+CREATE OR ALTER PROCEDURE dbo.sp_MIP_EliminaFormatoCnt
+    @CIA        VARCHAR(50),
+    @Radicado   VARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF ISNULL(@CIA, '') = '' OR ISNULL(@Radicado, '') = ''
+    BEGIN
+        SELECT 0 AS RESULTADO, 'CIA y Radicado son obligatorios.' AS MENSAJE;
+        RETURN;
+    END
+
+    DELETE FROM dbo.DQS_MIP_FORMATOS WHERE CIA = @CIA AND RADICADO = @Radicado;
+
+    IF @@ROWCOUNT > 0
+        SELECT 1 AS RESULTADO, 'Formato eliminado.' AS MENSAJE;
+    ELSE
+        SELECT 0 AS RESULTADO, 'No se encontró el formato para eliminar.' AS MENSAJE;
+END
+GO
+
+-- ---------------------------------------------------------------- sp_MIP_EliminaContingencia
+CREATE OR ALTER PROCEDURE dbo.sp_MIP_EliminaContingencia
+    @CIA        VARCHAR(50),
+    @Radicado   VARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF ISNULL(@CIA, '') = '' OR ISNULL(@Radicado, '') = ''
+    BEGIN
+        SELECT 0 AS RESULTADO, 'CIA y Radicado son obligatorios.' AS MENSAJE;
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.DQS_MIP_CONTINGENCIAS WHERE CIA = @CIA AND RADICADO = @Radicado)
+    BEGIN
+        SELECT 0 AS RESULTADO, 'No se encontró la contingencia para eliminar.' AS MENSAJE;
+        RETURN;
+    END
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DELETE FROM dbo.DQS_MIP_CONTINGENCIAS_TEC WHERE CIA = @CIA AND RADICADO = @Radicado;
+        DELETE FROM dbo.DQS_MIP_CONTINGENCIAS WHERE CIA = @CIA AND RADICADO = @Radicado;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        SELECT 0 AS RESULTADO, 'No fue posible eliminar la contingencia. Intente nuevamente.' AS MENSAJE;
+        RETURN;
+    END CATCH
+
+    SELECT 1 AS RESULTADO, 'Contingencia eliminada.' AS MENSAJE;
+END
+GO
