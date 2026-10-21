@@ -36,7 +36,7 @@
   entorno FORMATOS_DESTINO_CS o el archivo cifrado creado con -GuardarDestino.
 .PARAMETER GuardarOrigen
 .PARAMETER GuardarDestino
-  Piden la cadena (sin mostrarla), la prueban y la guardan cifradas con DPAPI en -ArchivoOrigen / -ArchivoDestino. Con el
+  Piden la cadena (sin mostrarla), la prueban y la guardan cifradas con DPAPI en -ArchivoOrigen / -ArchivoDestino (por defecto en C:\ProgramData\MigracionFormatosBD, con permisos solo para el usuario, Administradores y SYSTEM). Con el
   ambito CurrentUser (por defecto) solo las puede leer el mismo usuario de Windows en este equipo: la tarea programada debe
   correr con ese usuario. Nunca se escriben en el registro ni en el repositorio.
 .PARAMETER Simular
@@ -64,8 +64,8 @@ param(
     [switch] $Simular,
     [switch] $SoloNuevas,
     [string] $CarpetaLogs,
-    [string] $ArchivoOrigen = (Join-Path $env:LOCALAPPDATA 'MigracionFormatosBD\origen.dat'),
-    [string] $ArchivoDestino = (Join-Path $env:LOCALAPPDATA 'MigracionFormatosBD\destino.dat')
+    [string] $ArchivoOrigen,
+    [string] $ArchivoDestino
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,6 +81,11 @@ if (-not $CarpetaLogs) {
     $CarpetaLogs = Join-Path $raizScript 'logs-migracion-formatos-bd'
 }
 New-Item -ItemType Directory -Force -Path $CarpetaLogs | Out-Null
+# Las cadenas cifradas van en ProgramData y NO en %LOCALAPPDATA%: algunos entornos (p. ej. aplicaciones empaquetadas MSIX) virtualizan
+# AppData y lo que se escribe ahi no lo ve el Programador de tareas. El contenido va protegido con DPAPI del usuario, ademas del ACL.
+$carpetaCred = Join-Path $env:ProgramData 'MigracionFormatosBD'
+if (-not $ArchivoOrigen) { $ArchivoOrigen = Join-Path $carpetaCred 'origen.dat' }
+if (-not $ArchivoDestino) { $ArchivoDestino = Join-Path $carpetaCred 'destino.dat' }
 $archivoLog = Join-Path $CarpetaLogs ("migracion-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd_HHmmss'))
 function Log([string]$m) {
     $l = "{0:yyyy-MM-dd HH:mm:ss}  {1}" -f (Get-Date), $m
@@ -113,6 +118,8 @@ if ($GuardarOrigen -or $GuardarDestino) {
     $c = Abrir $cs; $c.Close()
     New-Item -ItemType Directory -Force -Path (Split-Path $archivo) | Out-Null
     [IO.File]::WriteAllBytes($archivo, (Cifrar $cs))
+    $dirCred = Split-Path $archivo
+    & icacls $dirCred /inheritance:r /grant:r "${env:USERDOMAIN}\${env:USERNAME}:(OI)(CI)F" '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' | Out-Null
     Log "Cadena del $que probada ($(Descripcion $cs)) y guardada cifrada ($Ambito) en $archivo"
     exit 0
 }
